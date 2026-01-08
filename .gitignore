@@ -1,0 +1,8 @@
+*/questasim
+/questasim
+*.bak
+*.log
+transcript
+/build
+*.vstf
+*.ini

@@ -1,4 +1,5 @@
 */questasim
+**/questasim
 /questasim
 *.bak
 *.log
@@ -6,3 +7,5 @@ transcript
 /build
 *.vstf
 *.ini
+*.wlf
+*.jou

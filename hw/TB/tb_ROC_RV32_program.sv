@@ -5,31 +5,26 @@ module tb_ROC_RV32_program;
 
 	logic clk;
 	logic rst_n;
+	logic rx;
+	logic tx;
+
+	parameter int CLK_FREQ = 50_000_000;
+	parameter int BAUD_RATE = 115200;
+	parameter int NANOS_PER_SEC = 1_000_000_000;
+	localparam time BIT_TIME = NANOS_PER_SEC / BAUD_RATE;
 
 	soc #(
-		.ADDR_WIDTH_I(10),
-		.DATA_WIDTH_I(32),
-		.ADDR_WIDTH_D(10),
-		.DATA_WIDTH_D(32)
+		.CLK_FREQ(CLK_FREQ),
+		.BAUD_RATE(BAUD_RATE)
 	) dut (
 		.clk(clk),
 		.rst_n(rst_n),
-		.imem_b_en(1'b0),
-		.imem_b_we(1'b0),
-		.imem_b_wstrb(4'b0000),
-		.imem_b_addr('0),
-		.imem_b_wdata('0),
-		.imem_b_rdata(),
-		.dmem_b_en(1'b0),
-		.dmem_b_we(1'b0),
-		.dmem_b_wstrb(4'b0000),
-		.dmem_b_addr('0),
-		.dmem_b_wdata('0),
-		.dmem_b_rdata()
+		.rx(rx),
+		.tx(tx)
 	);
 
 	initial clk = 1'b0;
-	always #5 clk = ~clk;
+	always #10 clk = ~clk;
 
 	task automatic reset_dut();
 		rst_n = 1'b0;
@@ -49,17 +44,144 @@ module tb_ROC_RV32_program;
 	bit          use_stop_wdata;
 	string imem_path;
 	integer fd;
+	logic [31:0] imem_image[$];
+	string line;
+	logic [31:0] dmem_buffer[$];
 
-	task automatic dump_dmem();
+	task automatic uart_send_byte(input logic [7:0] data);
+		@(posedge clk);
+		rx = 0;
+		#BIT_TIME;
+		for (int i = 0; i < 8; i++) begin
+			rx = data[i];
+			#BIT_TIME;
+		end
+		rx = 1;
+		#BIT_TIME;
+	endtask
+
+	task automatic uart_write_word32(input logic [31:0] data);
+		for (int i = 0; i < 4; i++) begin
+			uart_send_byte(data[i*8 +: 8]);
+		end
+	endtask
+
+	task automatic wait_dmem_words(input int count, input time timeout);
+		time start_time;
+		start_time = $time;
+		while (dmem_buffer.size() < count) begin
+			if (($time - start_time) > timeout) begin
+				$fatal(1, "Timeout waiting for %0d DMEM words, got %0d", count, dmem_buffer.size());
+			end
+			#BIT_TIME;
+		end
+	endtask
+
+	task automatic bootloader_read_dmem(input logic [14:0] addr,
+	                                    input logic [15:0] ndata,
+	                                    output logic [31:0] out[$]);
+		logic [31:0] header = {1'b0, addr, ndata};
+		int prev_size;
+		uart_write_word32(header);
+		prev_size = dmem_buffer.size();
+		if (ndata != 0) begin
+			wait_dmem_words(prev_size + ndata, BIT_TIME * (ndata * 40 + 200));
+		end
+		out.delete();
+		for (int i = 0; i < ndata; i++) begin
+			out.push_back(dmem_buffer.pop_front());
+		end
+	endtask
+
+	task automatic bootloader_write_imem(input logic [14:0] addr,
+	                                     input logic [15:0] ndata,
+	                                     input logic [31:0] data[$]);
+		logic [31:0] header = {1'b1, addr, ndata};
+		uart_write_word32(header);
+		for (int i = 0; i < ndata; i++) begin
+			uart_write_word32(data.pop_front());
+		end
+	endtask
+
+	task automatic load_imem_via_uart();
+		int r;
+		logic [31:0] word;
+		int idx;
+		int chunk_len;
+		int remaining;
+		logic [31:0] chunk[$];
+
+		imem_image.delete();
+		fd = $fopen(imem_path, "r");
+		if (fd == 0) begin
+			$fatal(1, "Failed to open %s", imem_path);
+		end
+		while (!$feof(fd)) begin
+			r = $fscanf(fd, "%h", word);
+			if (r == 1) begin
+				imem_image.push_back(word);
+			end else begin
+				void'($fgets(line, fd));
+			end
+		end
+		$fclose(fd);
+
+		if (imem_image.size() == 0) begin
+			$fatal(1, "IMEM image is empty");
+		end
+		if (imem_image.size() > (1<<10)) begin
+			$fatal(1, "IMEM image too large: %0d words", imem_image.size());
+		end
+
+		idx = 0;
+		remaining = imem_image.size();
+		while (remaining > 0) begin
+			chunk_len = (remaining > 128) ? 128 : remaining;
+			chunk.delete();
+			for (int i = 0; i < chunk_len; i++) begin
+				chunk.push_back(imem_image[idx + i]);
+			end
+			bootloader_write_imem(idx[14:0], chunk_len[15:0], chunk);
+			idx += chunk_len;
+			remaining -= chunk_len;
+		end
+	endtask
+
+	task automatic dump_dmem(input int count);
+		logic [31:0] words[$];
 		$display("---- DMEM DUMP (word-addressed) ----");
-		for (int i = 0; i < 100; i++) begin
-			$display("dmem[%0d]=0x%08x", i, dut.data_memory.data_memory.mem[i]);
+		bootloader_read_dmem(0, count, words);
+		for (int i = 0; i < words.size(); i++) begin
+			$display("dmem[%0d]=0x%08x", i, words[i]);
 		end
 		$display("----------------------------------");
 	endtask
 
+	// Monitor bootloader UART TX -> capture DMEM words
 	initial begin
-		rst_n = 1'b0;
+		integer i, j;
+		logic [7:0]  rx_byte;
+		logic [31:0] rx_word;
+
+		forever begin
+			rx_word = '0;
+			for (j = 0; j < 4; j++) begin
+				@(negedge tx);
+				#(BIT_TIME / 2);
+				for (i = 0; i < 8; i++) begin
+					#BIT_TIME;
+					rx_byte[i] = tx;
+				end
+				#BIT_TIME;
+				rx_word = {rx_byte, rx_word[31:8]};
+			end
+			dmem_buffer.push_back(rx_word);
+		end
+	end
+
+	initial begin
+		reset_dut();
+		rx = 1'b1;
 
 		// Stop condition configuration:
 		// - default: stop on an exact store of 0xDEADBEEF to dmem[word 0]
@@ -81,7 +203,7 @@ module tb_ROC_RV32_program;
 			dut.data_memory.data_memory.mem[i] = 32'h0000_0000;
 		end
 
-		// Load program into imem (generated by `make`).
+		// Load program into IMEM through bootloader UART.
 		// Note: Questa runs from ./questasim (see run_sim.tcl), so we try paths relative to that.
 		imem_path = "sw/imem.dat";
 		fd = $fopen(imem_path, "r");
@@ -93,10 +215,13 @@ module tb_ROC_RV32_program;
 			$fatal(1, "Failed to open sw/imem.dat (tried sw/imem.dat and ../sw/imem.dat)");
 		end
 		$fclose(fd);
-		$display("[TB] Loading IMEM from: %s", imem_path);
-		$readmemh(imem_path, dut.instruction_memory.data_memory.mem);
+		$display("[TB] Loading IMEM via bootloader from: %s", imem_path);
+
+		load_imem_via_uart();
+		#(BIT_TIME * 200);
 
 		reset_dut();
+
 
 		cycles = 0;
 		store_count = 0;
@@ -114,10 +239,10 @@ module tb_ROC_RV32_program;
 				$display("[WB] pc=0x%08x ir=0x%08x opcode=0x%02x rd=%0d rs1=%0d rs2=%0d", dut.cpu_core.pc_ir, dut.cpu_core.ir, dut.cpu_core.opcode, dut.cpu_core.rd, dut.cpu_core.rs1, dut.cpu_core.rs2);
 			end
 
-			if (rst_n && dut.wena_mem) begin
+			if (rst_n && dut.wena_mem_d) begin
 				store_count++;
-				$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr, dut.store_strb, dut.store_wdata);
-				if (dut.dmem_addr == stop_addr_word) begin
+				$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr_cpu, dut.store_strb, dut.store_wdata);
+				if (dut.dmem_addr_cpu == stop_addr_word) begin
 					last_word0_wdata = dut.store_wdata;
 					// PASS: exact match of stop_wdata (default 0xDEADBEEF)
 					if (use_stop_wdata && (dut.store_strb == 4'hF) && (dut.store_wdata == stop_wdata)) begin
@@ -141,6 +266,8 @@ module tb_ROC_RV32_program;
 		end
 		if (saw_fail_signature) begin
 			$fatal(1, "FAIL signature observed at dmem[word %0d]: wdata=0x%08x (code=0x%04x)", stop_addr_word, last_word0_wdata, last_word0_wdata[15:0]);
+		end else begin
+			$display("PASS: SUCCESS signature observed at dmem[word %0d]: wdata=0x%08x", stop_addr_word, last_word0_wdata);
 		end
 
 		// dmem is synchronous; allow the write to commit before reading mem[]
@@ -150,9 +277,17 @@ module tb_ROC_RV32_program;
 		$display("cycles=%0d pc_output=0x%08x cpu_state=%0d ir=0x%08x", cycles, dut.cpu_core.pc_output, dut.cpu_core.cpu_state, dut.cpu_core.ir);
 		$display("------------------------");
 
-		dump_dmem();
+		dump_dmem(10);
+		#(2000000);
+		dump_dmem(10);
+
+		load_imem_via_uart();
+		#(BIT_TIME * 200);
+
+		reset_dut();
+		dump_dmem(10);
+
 		$finish;
 	end
 
 endmodule
-

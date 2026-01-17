@@ -18,12 +18,6 @@ def main() -> int:
     ap.add_argument("bin", type=Path)
     ap.add_argument("out", type=Path)
     ap.add_argument("--words", type=int, default=None, help="Optional fixed number of output words")
-    ap.add_argument(
-        "--fill",
-        type=lambda s: int(s, 16),
-        default=0x00000013,
-        help="Fill word (hex) used when padding (default: 00000013 = addi x0,x0,0)",
-    )
     args = ap.parse_args()
 
     data = args.bin.read_bytes()
@@ -38,10 +32,7 @@ def main() -> int:
         words.append(word)
 
     if args.words is not None:
-        if len(words) < args.words:
-            words.extend([args.fill] * (args.words - len(words)))
-        else:
-            words = words[: args.words]
+        words = words[: args.words]
 
     args.out.write_text("\n".join(f"{w:08x}" for w in words) + "\n")
     return 0

@@ -26,7 +26,7 @@ module imem #(
         .clk(clk),
         .en_a(en_a),
         .we_a(we_a),
-        .wstrb_a({(DATA_WIDTH/8){1'b1}}),
+        .wstrb_a(0),
         .addr_a(addr_a),
         .din_a(din_a),
         .dout_a(dout_a),

@@ -8,9 +8,9 @@
 hw/RTL/core/alu_ops_pkg.sv
 hw/RTL/core/rv32_opcodes_pkg.sv
 
-hw/bootloader/load_store_controller.sv
-hw/bootloader/uart_word_adapter.sv
-hw/bootloader/uart.sv
+hw/RTL/bootloader/load_store_controller.sv
+hw/RTL/bootloader/uart_word_adapter.sv
+hw/RTL/bootloader/uart.sv
 
 hw/RTL/core/pc.sv
 hw/RTL/core/register_bank.sv

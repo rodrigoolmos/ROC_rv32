@@ -1,5 +1,5 @@
 module soc #(
-    parameter CLK_FREQ = 50_000_000,
+    parameter CLK_FREQ = 100_000_000,
     parameter BAUD_RATE = 115200,
     parameter int ADDR_WIDTH = 10,
     parameter int DATA_WIDTH = 32,
@@ -9,6 +9,7 @@ module soc #(
 ) (
     input  logic                               clk,
     input  logic                               rst_n,
+    output  logic                              led_status,
 
     input  logic rx,                        // Receive data line bootloader
     output logic tx                         // Transmit data line bootloader
@@ -18,19 +19,18 @@ module soc #(
 
     // instruction memory
     logic [DATA_WIDTH-1:0]            data_imem_o;
-    logic [DATA_WIDTH-1:0]            data_imem_i;
+    (* MARK_DEBUG = "TRUE" *) logic [DATA_WIDTH-1:0] data_imem_i;
     logic [ADDR_WIDTH-1:0]            imem_addr_cpu;
-    logic [ADDR_WIDTH-1:0]            imem_addr_boot;
-    logic                             we_i;
-
+    (* MARK_DEBUG = "TRUE" *) logic [ADDR_WIDTH-1:0] imem_addr_boot;
+    (* MARK_DEBUG = "TRUE" *) logic we_i;
 
     // data memory
     logic                              wena_mem_d;
     logic [ADDR_WIDTH-1:0]             dmem_addr_cpu;
-    logic [ADDR_WIDTH-1:0]             dmem_addr_boot;
+    (* MARK_DEBUG = "TRUE" *) logic [ADDR_WIDTH-1:0] dmem_addr_boot;
     logic [DATA_WIDTH-1:0]             store_wdata;
     logic [DATA_WIDTH-1:0]             data_dmem_o;
-    logic [DATA_WIDTH-1:0]             data_dmem_boot_o;
+    (* MARK_DEBUG = "TRUE" *) logic [DATA_WIDTH-1:0] data_dmem_boot_o;
     logic [(DATA_WIDTH/8)-1:0]         store_strb;
 
     // Core CPU
@@ -123,5 +123,7 @@ module soc #(
         .addr_i(imem_addr_boot),
         .din_i(data_imem_i)
     );
+
+    assign led_status = ~rst_n;
 
 endmodule

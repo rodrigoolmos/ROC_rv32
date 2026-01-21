@@ -8,6 +8,10 @@
 hw/RTL/core/alu_ops_pkg.sv
 hw/RTL/core/rv32_opcodes_pkg.sv
 
+hw/bootloader/load_store_controller.sv
+hw/bootloader/uart_word_adapter.sv
+hw/bootloader/uart.sv
+
 hw/RTL/core/pc.sv
 hw/RTL/core/register_bank.sv
 hw/RTL/core/decoder.sv
@@ -15,7 +19,8 @@ hw/RTL/core/control_unit.sv
 hw/RTL/core/alu.sv
 hw/RTL/core/ROC_RV32.sv
 
-hw/RTL/mem.sv
-hw/RTL/imem.sv
-hw/RTL/dmem.sv
+hw/RTL/memory/mem.sv
+hw/RTL/memory/imem.sv
+hw/RTL/memory/dmem.sv
+
 hw/RTL/soc.sv

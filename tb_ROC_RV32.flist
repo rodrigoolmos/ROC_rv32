@@ -17,9 +17,10 @@ hw/RTL/core/control_unit.sv
 hw/RTL/core/alu.sv
 hw/RTL/core/ROC_RV32.sv
 
-hw/RTL/mem.sv
-hw/RTL/imem.sv
-hw/RTL/dmem.sv
+hw/RTL/memory/mem.sv
+hw/RTL/memory/imem.sv
+hw/RTL/memory/dmem.sv
+
 hw/RTL/soc.sv
 
 hw/TB/tb_ROC_RV32_program.sv

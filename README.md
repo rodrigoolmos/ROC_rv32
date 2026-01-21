@@ -1,6 +1,6 @@
 # ROC_rv32
 
-Simple **RV32I** core (single-cycle / no pipeline) plus a minimal SoC + testbench and scripts to **compile a bare‑metal program**, load it into **instruction memory**, and **simulate** with QuestaSim/ModelSim.
+Simple **RV32I** core (single-cycle / no pipeline) plus a minimal SoC + testbench and scripts to **compile a bare‑metal program**, load it into **instruction memory**, and **simulate** with QuestaSim/ModelSim. Includes a **UART bootloader** for IMEM load and DMEM read, plus a **Vivado** bitstream flow.
 
 ## Quick start
 
@@ -41,6 +41,7 @@ Artifacts:
 - `build/main.bin`: raw binary
 - `build/main.asm`: disassembly
 - `sw/imem.dat`: program image used by the testbench
+- `tools/bootloader`: host UART tool (built by `make all`)
 
 ### Run the included RV32I test
 
@@ -67,6 +68,42 @@ Override it like this:
 make sim-gui TOP_MODULE=tb_ROC_RV32_program SW_APP=main.c
 ```
 
+## Bootloader (UART) usage
+
+Build the host tool:
+
+```bash
+make bootloader
+```
+
+Load IMEM from `sw/imem.dat` (default) starting at word address 0:
+
+```bash
+tools/bootloader -addr 0 -load -port /dev/ttyUSB0
+```
+
+Read DMEM words (example: 16 words at address 0):
+
+```bash
+tools/bootloader -addr 0 -ndata 16 -read -port /dev/ttyUSB0
+```
+
+Notes:
+- `-addr` is a **word** address (0..1023).
+- `-file` overrides the IMEM file path.
+- Baud rate is fixed at 115200.
+
+## Vivado bitstream (Nexys A7)
+
+Run the batch flow:
+
+```bash
+make vivado-syn
+```
+
+Output bitstream:
+- `vivado/vivado_proj/roc_rv32.runs/impl_1/soc.bit`
+
 ## Repository layout
 
 - `hw/RTL/`: synthesizable RTL
@@ -81,6 +118,7 @@ make sim-gui TOP_MODULE=tb_ROC_RV32_program SW_APP=main.c
 	- `tests/`: additional C/ASM tests
 - `tools/`:
 	- `bin2imem.py`: converts `build/main.bin` → `sw/imem.dat`
+	- `bootloader.c`: UART host tool (IMEM load, DMEM read)
 	- `run_sim.tcl`, `run_sim_batch.tcl`: QuestaSim scripts (GUI / batch)
 - `tb_ROC_RV32.flist`: filelist used by Questa compilation
 

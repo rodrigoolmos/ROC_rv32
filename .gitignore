@@ -9,3 +9,4 @@ transcript
 *.ini
 *.wlf
 *.jou
+/vivado/vivado_proj

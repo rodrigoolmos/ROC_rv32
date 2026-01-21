@@ -9,6 +9,7 @@ RISCV_PREFIX ?= riscv32-unknown-elf-
 CC      := $(RISCV_PREFIX)gcc
 OBJDUMP := $(RISCV_PREFIX)objdump
 OBJCOPY := $(RISCV_PREFIX)objcopy
+HOST_CC ?= gcc
 
 BUILD_DIR := build
 
@@ -17,6 +18,7 @@ BIN := $(BUILD_DIR)/main.bin
 ASM := $(BUILD_DIR)/main.asm
 
 IMEM_DAT := sw/imem.dat
+BOOTLOADER_BIN := tools/bootloader
 
 SW_DIR := sw
 
@@ -33,9 +35,9 @@ CFLAGS  := -march=rv32i -mabi=ilp32 -O0 -g3 \
 	-fno-jump-tables -fno-tree-switch-conversion -Wall -Wextra
 LDFLAGS := -nostdlib -Wl,-T,$(SW_DIR)/link.ld -Wl,--gc-sections
 
-.PHONY: all clean toolchain-check sim sim-gui sim-batch riscv-test riscv-test-sim
+.PHONY: all clean toolchain-check sim sim-gui sim-batch riscv-test riscv-test-sim vivado-syn bootloader
 
-all: $(IMEM_DAT) $(ASM)
+all: $(IMEM_DAT) $(ASM) bootloader
 
 toolchain-check:
 	@command -v $(CC) >/dev/null 2>&1 || (echo "ERROR: $(CC) not found. Install a RISC-V GCC toolchain, or override RISCV_PREFIX (e.g. make RISCV_PREFIX=riscv64-unknown-elf-)." && exit 1)
@@ -57,6 +59,7 @@ $(IMEM_DAT): $(BIN) tools/bin2imem.py
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMEM_DAT)
+	rm -f $(BOOTLOADER_BIN)
 
 # Simulation configuration
 TOP_MODULE ?= tb_ROC_RV32_program
@@ -85,3 +88,10 @@ riscv-test:
 riscv-test-sim:
 	$(MAKE) SW_APP=tests/rv32i_full.S sim
 
+vivado-syn:
+	vivado -mode batch -source vivado/run.tcl
+
+bootloader: $(BOOTLOADER_BIN)
+
+$(BOOTLOADER_BIN): tools/bootloader.c
+	$(HOST_CC) -O2 -Wall -Wextra -o $@ $<

@@ -174,7 +174,7 @@ jalr_target:
   ASSERT_EQ_IMM 31, t3, 0xFFFFFFAA
 
   // --- PASS ---
-  li   t0, 0
+  addi t0, s2, 0
 	li   t1, 0xDEADBEEF
   sw   t1, 0(t0)
 pass_halt:
@@ -184,4 +184,3 @@ jal_target:
   // Save return address from JAL and return via JALR.
   addi s1, ra, 0
   jalr x0, ra, 0
-

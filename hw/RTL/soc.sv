@@ -26,32 +26,69 @@ module soc #(
 
     // data memory
     logic                              wena_mem_d;
+    logic [(DATA_WIDTH/8)-1:0]         store_strb;
     logic [ADDR_WIDTH-1:0]             dmem_addr_cpu;
-    (* MARK_DEBUG = "TRUE" *) logic [ADDR_WIDTH-1:0] dmem_addr_boot;
     logic [DATA_WIDTH-1:0]             store_wdata;
     logic [DATA_WIDTH-1:0]             data_dmem_o;
-    (* MARK_DEBUG = "TRUE" *) logic [DATA_WIDTH-1:0] data_dmem_boot_o;
-    logic [(DATA_WIDTH/8)-1:0]         store_strb;
+    logic [ADDR_WIDTH-1:0]             dmem_addr_boot;
+    logic [DATA_WIDTH-1:0]             data_dmem_boot_o;
+
+    // LSU interconnect signals
+    logic                    rready_lsu;
+    logic                    rvalid_lsu;
+    logic                    wready_lsu;
+    logic                    wvalid_lsu;
+    logic [3:0]              strb_lsu;
+    logic [31:0]             addr_lsu;
+    logic [31:0]             data_lsu_i;
+    logic [31:0]             data_lsu_o;
+
 
     // Core CPU
     ROC_RV32 #(
         .ADDR_WIDTH_I(ADDR_WIDTH),
         .DATA_WIDTH_I(DATA_WIDTH),
         .ADDR_WIDTH_D(ADDR_WIDTH),
-        .DATA_WIDTH_D(DATA_WIDTH),
-        .DMEM_BASE(DMEM_BASE)
+        .DATA_WIDTH_D(DATA_WIDTH)
     ) cpu_core (
         .clk(clk),
         .rst_n(rst_n),
         // instruction memory
         .data_imem(data_imem_o),
         .imem_addr(imem_addr_cpu),
-        // data memory
-        .wena_mem(wena_mem_d),
-        .store_strb(store_strb),
-        .dmem_addr(dmem_addr_cpu),
-        .store_wdata(store_wdata),
-        .data_dmem_o(data_dmem_o)
+        // lsu
+        .rready_cpu(rready_lsu),
+        .rvalid_cpu(rvalid_lsu),
+        .wready_cpu(wready_lsu),
+        .wvalid_cpu(wvalid_lsu),
+        .strb_cpu(strb_lsu),
+        .addr_cpu(addr_lsu),
+        .data_cpu_o(data_lsu_i),
+        .data_cpu_i(data_lsu_o)
+    );
+
+    // LSU Interconnect
+    lsu_interconnect #(
+        .ADDR_DMEM_WIDTH(ADDR_WIDTH),
+        .DMEM_BASE(DMEM_BASE)
+    ) lsu_ic (
+        .clk(clk),
+        .nrst(rst_n),
+        // DMEM INTERFACE
+        .we_dmem(wena_mem_d),
+        .wstrb_dmem(store_strb),
+        .addr_dmem(dmem_addr_cpu),
+        .din_dmem(store_wdata),
+        .dout_dmem(data_dmem_o),
+        // CPU INTERFACE
+        .rready_lsu(rready_lsu),
+        .rvalid_lsu(rvalid_lsu),
+        .wready_lsu(wready_lsu),
+        .wvalid_lsu(wvalid_lsu),
+        .strb_lsu(strb_lsu),
+        .addr_lsu(addr_lsu),
+        .data_lsu_i(data_lsu_i),
+        .data_lsu_o(data_lsu_o)
     );
 
     // Instruction Memory (sync read)

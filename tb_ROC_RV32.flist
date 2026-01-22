@@ -21,6 +21,8 @@ hw/RTL/memory/mem.sv
 hw/RTL/memory/imem.sv
 hw/RTL/memory/dmem.sv
 
+hw/RTL/peripherals/lsu_interconnect.sv
+
 hw/RTL/soc.sv
 
 hw/TB/tb_ROC_RV32_program.sv

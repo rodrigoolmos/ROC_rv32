@@ -5,10 +5,7 @@ module ROC_RV32 #(
     parameter int ADDR_WIDTH_I = 10,
     parameter int DATA_WIDTH_I = 32,
     parameter int ADDR_WIDTH_D = 10,
-    parameter int DATA_WIDTH_D = 32,
-    // Base address for data memory (Harvard mapping).
-    // All LOAD/STORE addresses are expected to be in [DMEM_BASE, DMEM_BASE + 4*2**ADDR_WIDTH_D).
-    parameter logic [31:0] DMEM_BASE = 32'h1000_0000
+    parameter int DATA_WIDTH_D = 32
 ) (
     input  logic                               clk,
     input  logic                               rst_n,
@@ -16,12 +13,15 @@ module ROC_RV32 #(
     input  logic [DATA_WIDTH_I-1:0]            data_imem,
     output logic [ADDR_WIDTH_I-1:0]            imem_addr,
 
-    // data memory
-    output logic                                wena_mem,
-    output logic [(DATA_WIDTH_D/8)-1:0]         store_strb,
-    output logic [ADDR_WIDTH_D-1:0]             dmem_addr,
-    output logic [DATA_WIDTH_D-1:0]             store_wdata,
-    input  logic [DATA_WIDTH_D-1:0]             data_dmem_o
+    // LSU
+    output  logic                    rready_cpu,
+    input   logic                    rvalid_cpu,
+    input   logic                    wready_cpu,
+    output  logic                    wvalid_cpu,
+    output  logic [3:0]              strb_cpu,
+    output  logic [31:0]             addr_cpu,
+    output  logic [31:0]             data_cpu_o,
+    input   logic [31:0]             data_cpu_i
 );
 
     logic [31:0] ir;
@@ -65,14 +65,11 @@ module ROC_RV32 #(
     logic [31:0] do1;
     logic [31:0] do2;
 
-    logic [31:0] dmem_byte_addr;
-
     logic [31:0] alu_op1;
 
     // Word-addressed memories (PC/result are byte addresses)
     assign imem_addr = pc_output[ADDR_WIDTH_I+1:2];
-    assign dmem_byte_addr = alu_out - DMEM_BASE;
-    assign dmem_addr = dmem_byte_addr[ADDR_WIDTH_D+1:2];
+    assign addr_cpu = alu_out;
 
     //////////////// ALU ////////////////
     // MUX for ALU operand 2 immediate or register
@@ -103,7 +100,7 @@ module ROC_RV32 #(
         // From datapath/memory (for load/store formatting)
         .alu_out(alu_out),
         .rs2_data(do2),
-        .dmem_rdata(data_dmem_o),
+        .data_cpu_o(data_cpu_o),
 
         .cpu_state(cpu_state),
         // control signals
@@ -112,13 +109,13 @@ module ROC_RV32 #(
         .imm_ext(imm_ext),              // Extended immediate value
         .alu_src1(alu_src1),            // 0: operand A = rs1, 1: operand A = pc
         .alu_src2(alu_src2),            // 0: operand B = rs2, 1: operand B = immediate
-        .wena_mem(wena_mem),            // Write enable for data memory
+        .wvalid_cpu(wvalid_cpu),        // Write enable for LSU
         .data_2_reg(data_2_reg),        // Data to register from ALU 00 Memory 01 PC 10 IMM 11 
         .branch_invert(branch_invert),  // Branch taken signal MUX control
 
         .load_ext(load_ext),            // Data sign extended
-        .store_wdata(store_wdata),      // Data to store after formatting
-        .store_strb(store_strb)         // Byte write strobe for store
+        .data_cpu_i(data_cpu_i),        // Data to store after formatting
+        .strb_cpu(strb_cpu)             // Byte write strobe for store
     );
 
     // decoder

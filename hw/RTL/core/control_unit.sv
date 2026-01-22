@@ -17,7 +17,7 @@ module control_unit(
     // From datapath/memory (for load/store formatting)
     input logic [31:0] alu_out,
     input logic [31:0] rs2_data,
-    input logic [31:0] dmem_rdata,
+    input logic [31:0] data_cpu_i,
 
     output logic [2:0]  cpu_state,
 
@@ -28,7 +28,7 @@ module control_unit(
     output logic        alu_src1,
     // 0: operand B = rs2, 1: operand B = immediate
     output logic        alu_src2,
-    output logic        wena_mem,   // Write enable for data memory
+    output logic        wvalid_cpu,   // Write enable for lsu
     // Data to register from ALU 00 Memory 01 PC 10 IMM 11 
     output logic [1:0]  data_2_reg,
     // select if branch is taken or not since we only have in ALU
@@ -37,8 +37,8 @@ module control_unit(
 
     // To datapath/memory
     output logic [31:0] load_ext,
-    output logic [31:0] store_wdata,
-    output logic [3:0]  store_strb
+    output logic [31:0] data_cpu_o,
+    output logic [3:0]  strb_cpu
 );
 
     localparam logic [2:0]
@@ -220,10 +220,10 @@ module control_unit(
 
     // select if we are writing to memory
     always_comb begin
-        wena_mem = 1'b0;
+        wvalid_cpu = 1'b0;
         // Any STORE writes in S_MEM (DMEM uses wstrb to mask bytes)
         if (cpu_state == S_MEM && opcode == OPC_STORE)
-            wena_mem = 1'b1;
+            wvalid_cpu = 1'b1;
     end
 
     // extend immediate value based on instruction type
@@ -272,41 +272,41 @@ module control_unit(
 
     // Load sign/zero extension based on funct3 and byte offset (alu_out is byte address)
     always_comb begin
-        load_ext = dmem_rdata;
+        load_ext = data_cpu_i;
         if (opcode == OPC_LOAD) begin
             unique case (funct3)
                 3'b000: begin // LB
                     unique case (alu_out[1:0])
-                        2'b00: load_ext = {{24{dmem_rdata[7]}},  dmem_rdata[7:0]};
-                        2'b01: load_ext = {{24{dmem_rdata[15]}}, dmem_rdata[15:8]};
-                        2'b10: load_ext = {{24{dmem_rdata[23]}}, dmem_rdata[23:16]};
-                        2'b11: load_ext = {{24{dmem_rdata[31]}}, dmem_rdata[31:24]};
+                        2'b00: load_ext = {{24{data_cpu_i[7]}},  data_cpu_i[7:0]};
+                        2'b01: load_ext = {{24{data_cpu_i[15]}}, data_cpu_i[15:8]};
+                        2'b10: load_ext = {{24{data_cpu_i[23]}}, data_cpu_i[23:16]};
+                        2'b11: load_ext = {{24{data_cpu_i[31]}}, data_cpu_i[31:24]};
                         default: load_ext = 32'b0;
                     endcase
                 end
                 3'b001: begin // LH
                     if (alu_out[1] == 1'b0)
-                        load_ext = {{16{dmem_rdata[15]}}, dmem_rdata[15:0]};
+                        load_ext = {{16{data_cpu_i[15]}}, data_cpu_i[15:0]};
                     else
-                        load_ext = {{16{dmem_rdata[31]}}, dmem_rdata[31:16]};
+                        load_ext = {{16{data_cpu_i[31]}}, data_cpu_i[31:16]};
                 end
-                3'b010: load_ext = dmem_rdata; // LW
+                3'b010: load_ext = data_cpu_i; // LW
                 3'b100: begin // LBU
                     unique case (alu_out[1:0])
-                        2'b00: load_ext = {24'b0, dmem_rdata[7:0]};
-                        2'b01: load_ext = {24'b0, dmem_rdata[15:8]};
-                        2'b10: load_ext = {24'b0, dmem_rdata[23:16]};
-                        2'b11: load_ext = {24'b0, dmem_rdata[31:24]};
+                        2'b00: load_ext = {24'b0, data_cpu_i[7:0]};
+                        2'b01: load_ext = {24'b0, data_cpu_i[15:8]};
+                        2'b10: load_ext = {24'b0, data_cpu_i[23:16]};
+                        2'b11: load_ext = {24'b0, data_cpu_i[31:24]};
                         default: load_ext = 32'b0;
                     endcase
                 end
                 3'b101: begin // LHU
                     if (alu_out[1] == 1'b0)
-                        load_ext = {16'b0, dmem_rdata[15:0]};
+                        load_ext = {16'b0, data_cpu_i[15:0]};
                     else
-                        load_ext = {16'b0, dmem_rdata[31:16]};
+                        load_ext = {16'b0, data_cpu_i[31:16]};
                 end
-                default: load_ext = dmem_rdata;
+                default: load_ext = data_cpu_i;
             endcase
         end
     end
@@ -314,26 +314,26 @@ module control_unit(
     // Store data + byte strobes (SW/SB/SH)
     // Memory performs byte-masked merge using wstrb.
     always_comb begin
-        store_wdata = rs2_data;
-        store_strb  = 4'b0000;
+        data_cpu_o = rs2_data;
+        strb_cpu  = 4'b0000;
 
         if (opcode == OPC_STORE) begin
             unique case (funct3)
                 3'b010: begin // SW
-                    store_wdata = rs2_data;
-                    store_strb  = 4'b1111;
+                    data_cpu_o = rs2_data;
+                    strb_cpu  = 4'b1111;
                 end
                 3'b000: begin // SB
-                    store_wdata = {4{rs2_data[7:0]}} << (alu_out[1:0] * 8);
-                    store_strb  = 4'b0001 << alu_out[1:0];
+                    data_cpu_o = {4{rs2_data[7:0]}} << (alu_out[1:0] * 8);
+                    strb_cpu  = 4'b0001 << alu_out[1:0];
                 end
                 3'b001: begin // SH
-                    store_wdata = {16'b0, rs2_data[15:0]} << (alu_out[1] * 16);
-                    store_strb  = (alu_out[1] == 1'b0) ? 4'b0011 : 4'b1100;
+                    data_cpu_o = {16'b0, rs2_data[15:0]} << (alu_out[1] * 16);
+                    strb_cpu  = (alu_out[1] == 1'b0) ? 4'b0011 : 4'b1100;
                 end
                 default: begin
-                    store_wdata = rs2_data;
-                    store_strb  = 4'b0000;
+                    data_cpu_o = rs2_data;
+                    strb_cpu  = 4'b0000;
                 end
             endcase
         end

@@ -28,6 +28,9 @@ module control_unit(
     output logic        alu_src1,
     // 0: operand B = rs2, 1: operand B = immediate
     output logic        alu_src2,
+    output  logic       rready_cpu,   // Read ready for lsu
+    input   logic       rvalid_cpu,   // Read valid from lsu
+    input   logic       wready_cpu,   // Write ready from lsu
     output logic        wvalid_cpu,   // Write enable for lsu
     // Data to register from ALU 00 Memory 01 PC 10 IMM 11 
     output logic [1:0]  data_2_reg,
@@ -53,7 +56,13 @@ module control_unit(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cpu_state <= S_FETCH;
+            rready_cpu <= 0;
+            wvalid_cpu <= 0;
         end else begin
+            // Default deassertions each cycle; asserted only in S_MEM.
+            rready_cpu <= 1'b0;
+            wvalid_cpu <= 1'b0;
+
             unique case (cpu_state)
                 // Wait 1 cycle so synchronous imem presents the instruction for current PC.
                 S_FETCH:  cpu_state <= S_DECODE;
@@ -73,11 +82,18 @@ module control_unit(
 
                 // Memory access: for LOAD we need a WB cycle; for STORE we're done.
                 S_MEM: begin
-                    if (opcode == OPC_LOAD)
-                        cpu_state <= S_WB;
-                    else if (opcode == OPC_STORE) begin
-                        // All stores complete here (byte strobes supported by DMEM)
-                        cpu_state <= S_FETCH;
+                    if (opcode == OPC_LOAD) begin
+                        rready_cpu <= 1'b1;
+                        if (rvalid_cpu & rready_cpu) begin
+                            rready_cpu <= 1'b0;
+                            cpu_state <= S_WB;
+                        end
+                    end else if (opcode == OPC_STORE) begin
+                        wvalid_cpu <= 1'b1;
+                        if (wready_cpu & wvalid_cpu) begin
+                            wvalid_cpu <= 1'b0;
+                            cpu_state <= S_FETCH;
+                        end
                     end else begin
                         cpu_state <= S_FETCH;
                     end
@@ -216,14 +232,6 @@ module control_unit(
                 default:    wena_reg = 1'b0;
             endcase
         end
-    end
-
-    // select if we are writing to memory
-    always_comb begin
-        wvalid_cpu = 1'b0;
-        // Any STORE writes in S_MEM (DMEM uses wstrb to mask bytes)
-        if (cpu_state == S_MEM && opcode == OPC_STORE)
-            wvalid_cpu = 1'b1;
     end
 
     // extend immediate value based on instruction type

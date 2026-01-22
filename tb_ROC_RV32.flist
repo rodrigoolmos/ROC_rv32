@@ -22,6 +22,7 @@ hw/RTL/memory/imem.sv
 hw/RTL/memory/dmem.sv
 
 hw/RTL/peripherals/lsu_interconnect.sv
+hw/RTL/peripherals/axi_uart/axi_s_to_fifos/axi_lite_template/axi_lite_template.sv
 
 hw/RTL/soc.sv
 

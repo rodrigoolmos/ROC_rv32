@@ -1,0 +1,3 @@
+[submodule "hw/RTL/peripherals/axi_uart"]
+	path = hw/RTL/peripherals/axi_uart
+	url = https://github.com/rodrigoolmos/axi_uart.git

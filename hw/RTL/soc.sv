@@ -43,6 +43,26 @@ module soc #(
     logic [31:0]             data_lsu_i;
     logic [31:0]             data_lsu_o;
 
+    // AXI4-Lite MASTER INTERFACE signals
+    logic [31:0]              awaddr;
+    logic [2:0]               awprot;
+    logic                     awvalid;
+    logic                     awready;
+    logic [31:0]              wdata;
+    logic [3:0]               wstrb;
+    logic                     wvalid;
+    logic                     wready;
+    logic [1:0]               bresp;
+    logic                     bvalid;
+    logic                     bready;
+    logic [31:0]              araddr;
+    logic [2:0]               arprot;
+    logic                     arvalid;
+    logic                     arready;
+    logic [31:0]              rdata;
+    logic [1:0]               rresp;
+    logic                     rvalid;
+    logic                     rready;
 
     // Core CPU
     ROC_RV32 #(
@@ -67,6 +87,40 @@ module soc #(
         .data_cpu_i(data_lsu_o)
     );
 
+    // AXI4-Lite example peripheral
+    axi_lite_template #(
+        .C_ADDR_WIDTH(9),
+        .C_DATA_WIDTH(32)
+    ) example_peripheral (
+        .clk(clk),
+        .nrst(rst_n),
+
+        // AXI4-Lite SLAVE
+        .awaddr(awaddr),
+        .awprot(awprot),
+        .awvalid(awvalid),
+        .awready(awready),
+
+        .wdata(wdata),
+        .wstrb(wstrb),
+        .wvalid(wvalid),
+        .wready(wready),
+
+        .bresp(bresp),
+        .bvalid(bvalid),
+        .bready(bready),
+
+        .araddr(araddr),
+        .arprot(arprot),
+        .arvalid(arvalid),
+        .arready(arready),
+
+        .rdata(rdata),
+        .rresp(rresp),
+        .rvalid(rvalid),
+        .rready(rready)
+    );
+
     // LSU Interconnect
     lsu_interconnect #(
         .ADDR_DMEM_WIDTH(ADDR_WIDTH),
@@ -74,12 +128,39 @@ module soc #(
     ) lsu_ic (
         .clk(clk),
         .nrst(rst_n),
+
         // DMEM INTERFACE
         .we_dmem(wena_mem_d),
         .wstrb_dmem(store_strb),
         .addr_dmem(dmem_addr_cpu),
         .din_dmem(store_wdata),
         .dout_dmem(data_dmem_o),
+
+        // AXI4-Lite MASTER INTERFACE
+        .awaddr(awaddr),
+        .awprot(awprot),
+        .awvalid(awvalid),
+        .awready(awready),
+
+        .wdata(wdata),
+        .wstrb(wstrb),
+        .wvalid(wvalid),
+        .wready(wready),
+
+        .bresp(bresp),
+        .bvalid(bvalid),
+        .bready(bready),
+
+        .araddr(araddr),
+        .arprot(arprot),
+        .arvalid(arvalid),
+        .arready(arready),
+
+        .rdata(rdata),
+        .rresp(rresp),
+        .rvalid(rvalid),
+        .rready(rready),
+
         // CPU INTERFACE
         .rready_lsu(rready_lsu),
         .rvalid_lsu(rvalid_lsu),

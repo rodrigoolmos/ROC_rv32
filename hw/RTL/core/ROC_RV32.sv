@@ -109,6 +109,9 @@ module ROC_RV32 #(
         .imm_ext(imm_ext),              // Extended immediate value
         .alu_src1(alu_src1),            // 0: operand A = rs1, 1: operand A = pc
         .alu_src2(alu_src2),            // 0: operand B = rs2, 1: operand B = immediate
+        .rready_cpu(rready_cpu),        // Read enable for LSU
+        .rvalid_cpu(rvalid_cpu),        // Read valid from LSU
+        .wready_cpu(wready_cpu),        // Write ready from LSU
         .wvalid_cpu(wvalid_cpu),        // Write enable for LSU
         .data_2_reg(data_2_reg),        // Data to register from ALU 00 Memory 01 PC 10 IMM 11 
         .branch_invert(branch_invert),  // Branch taken signal MUX control

@@ -171,16 +171,25 @@ module tb_ROC_RV32_program;
 		logic [7:0] tx_byte;
 
 		forever begin
+			// esperar línea en idle
+			wait (uart_tx == 1'b1);
+			// detectar start bit real
 			@(negedge uart_tx);
+			// muestrear en el centro del start bit
 			#(BIT_TIME / 2);
+
+			// muestrear 8 bits de datos
 			for (i = 0; i < 8; i++) begin
 				#BIT_TIME;
 				tx_byte[i] = uart_tx;
 			end
+
+			// esperar stop bit
 			#BIT_TIME;
 			$write("%c", tx_byte);
 		end
 	end
+
 
 	// Monitor bootloader UART TX -> capture DMEM words
 	initial begin
@@ -262,12 +271,12 @@ module tb_ROC_RV32_program;
 			cycles++;
 
 			if (rst_n && dut.cpu_core.cpu_state == 3'd4) begin
-				//$display("[WB] pc=0x%08x ir=0x%08x opcode=0x%02x rd=%0d rs1=%0d rs2=%0d", dut.cpu_core.pc_ir, dut.cpu_core.ir, dut.cpu_core.opcode, dut.cpu_core.rd, dut.cpu_core.rs1, dut.cpu_core.rs2);
+				$display("[WB] pc=0x%08x ir=0x%08x opcode=0x%02x rd=%0d rs1=%0d rs2=%0d", dut.cpu_core.pc_ir, dut.cpu_core.ir, dut.cpu_core.opcode, dut.cpu_core.rd, dut.cpu_core.rs1, dut.cpu_core.rs2);
 			end
 
 			if (rst_n && dut.wena_mem_d) begin
 				store_count++;
-				//$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr_cpu, dut.store_strb, dut.store_wdata);
+				$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr_cpu, dut.store_strb, dut.store_wdata);
 				if (dut.dmem_addr_cpu == stop_addr_word) begin
 					last_word0_wdata = dut.store_wdata;
 					// PASS: exact match of stop_wdata (default 0xDEADBEEF)

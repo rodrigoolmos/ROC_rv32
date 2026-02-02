@@ -52,6 +52,9 @@ int main(void) {
     char signature_love[4] = {'L', 'O', 'V', 'E'};
     char signature_hada[4] = {'H', 'A', 'D', 'A'};
 
+    print(addr_uart, "Start program\n\0");
+
+
     // Avoid local array initializers: they often compile into calls to memcpy
     // (and with -nostdlib that breaks the link).
     // Instead generate the patterns directly.
@@ -131,16 +134,9 @@ int main(void) {
 
     set_dir_gpios_output(addr_gpio, 0xFFFF0000u);
 
-    print(addr_uart, "Hello world\n\0");
-    addr_uart[1] = 'A';
-    addr_uart[1] = 'B';
-    addr_uart[1] = 'C';
-    addr_uart[1] = 'D';
-    addr_uart[1] = 'E';
-    addr_uart[1] = 'F';
     uint32_t pattern = 0x0000fu;
     
-    for (;;){
+    for (int i=0; i<100; i++){
 
         set_gpios_value(addr_gpio, (pattern << 16));
         pattern = (pattern << 1);
@@ -151,6 +147,7 @@ int main(void) {
         wait_cycles(100u);
     }
     
+    print(addr_uart, "End program\n\0");
 
     okay(addr_dmem);
     // infinite loop to prevent function return

@@ -8,9 +8,13 @@ module lsu_interconnect #(
     // Base address for data memory (Harvard mapping).
     // All LOAD/STORE addresses are expected to be in [DMEM_BASE, DMEM_BASE + 4*2**ADDR_WIDTH_LSU).
     parameter logic [31:0] DMEM_BASE = 32'h1000_0000,
+    // Base address for instruction memory (read-only data window).
+    parameter logic [31:0] IMEM_BASE = 32'h2000_0000,
 
     // DMEM length in bytes (word-addressed depth is 2**ADDR_DMEM_WIDTH).
     parameter logic [31:0] DMEM_LENGTH = (32'h1 << (ADDR_DMEM_WIDTH + 2)),
+    // IMEM length in bytes (assume same depth as DMEM unless overridden).
+    parameter logic [31:0] IMEM_LENGTH = (32'h1 << (ADDR_DMEM_WIDTH + 2)),
     parameter addr_region_t DMEM_MAP = '{base: DMEM_BASE, length: DMEM_LENGTH},
     parameter addr_region_t MMIO_MAP = '{base: 0, length: 32'h1000_0000}
 ) (
@@ -24,6 +28,10 @@ module lsu_interconnect #(
     output logic [ADDR_DMEM_WIDTH-1:0]  addr_dmem,
     output logic [31:0]                 din_dmem,
     input  logic [31:0]                 dout_dmem,
+
+    // IMEM READ-ONLY INTERFACE
+    output logic [ADDR_DMEM_WIDTH-1:0]  addr_imem,
+    input  logic [31:0]                 dout_imem,
 
     // AXI4-Lite MASTER INTERFACE
     output logic [31:0]              awaddr,
@@ -63,7 +71,7 @@ module lsu_interconnect #(
 
     logic [31:0] lsu_byte_addr;
 
-    typedef enum logic [1:0] {IDLE, SEND, WAIT_B} state_t;
+    typedef enum logic [1:0] {IDLE, SEND, WAIT_B, WAIT_END} state_t;
     state_t st_w, st_r;
 
     // WRITE CHANNEL SIGNALS
@@ -80,12 +88,16 @@ module lsu_interconnect #(
     logic wready_axi;
 
     logic dmem_range, mmio_range;
+    logic imem_range;
+    logic [31:0] imem_byte_addr;
 
     assign dmem_range = (addr_lsu >= DMEM_MAP.base) && (addr_lsu < (DMEM_MAP.base + DMEM_MAP.length));
+    assign imem_range = (addr_lsu >= IMEM_BASE) && (addr_lsu < (IMEM_BASE + IMEM_LENGTH));
     assign mmio_range = (addr_lsu >= MMIO_MAP.base) && (addr_lsu < (MMIO_MAP.base + MMIO_MAP.length));
 
     always_comb begin
         lsu_byte_addr = addr_lsu - DMEM_BASE;
+        imem_byte_addr = addr_lsu - IMEM_BASE;
         // ADDR IN DMEM RANGE
         if (dmem_range) begin
             // CONNECT TO DMEM INTERFACE
@@ -97,6 +109,17 @@ module lsu_interconnect #(
             // DMEM dont implement ready/valid handshake
             rvalid_lsu   = 1;
             wready_lsu   = 1;
+            addr_imem    = '0;
+        // ADDR IN IMEM RANGE (READ-ONLY)
+        end else if (imem_range) begin
+            we_dmem      = 0;
+            wstrb_dmem   = 0;
+            addr_dmem    = 0;
+            din_dmem     = 0;
+            addr_imem    = imem_byte_addr[ADDR_DMEM_WIDTH+1:2];
+            data_lsu_o   = dout_imem;
+            rvalid_lsu   = 1;
+            wready_lsu   = 0;
         // ADDR IN MMIO RANGE
         end else if (mmio_range) begin
             // CONNECT TO AXI INTERFACE
@@ -104,6 +127,7 @@ module lsu_interconnect #(
             wstrb_dmem   = 0;
             addr_dmem    = 0;
             din_dmem     = 0;
+            addr_imem    = '0;
             data_lsu_o   = lat_rdata;
             rvalid_lsu   = rvalid_axi;
             wready_lsu   = wready_axi;
@@ -114,6 +138,7 @@ module lsu_interconnect #(
             wstrb_dmem   = 0;
             addr_dmem    = 0;
             din_dmem     = 0;
+            addr_imem    = '0;
             data_lsu_o   = 32'hDEAD_BEEF;
             rvalid_lsu   = 0;
             wready_lsu   = 0;
@@ -157,8 +182,14 @@ module lsu_interconnect #(
 
             WAIT_B: begin
                 if (bvalid && bready) begin
-                    st_w <= IDLE;
+                    st_w <= WAIT_END;
                     wready_axi <= 1;
+                end
+            end
+
+            WAIT_END: begin
+                if (wready_lsu && wvalid_lsu) begin
+                    st_w <= IDLE;
                 end
             end
 
@@ -205,8 +236,14 @@ module lsu_interconnect #(
                 end 
 
                 if (ar_done && r_done) begin
-                    st_r <= IDLE;
+                    st_r <= WAIT_END;
                     rvalid_axi <= 1;
+                end
+            end
+
+            WAIT_END: begin
+                if (rvalid_lsu && rready_lsu) begin
+                    st_r <= IDLE;
                 end
             end
 
@@ -223,6 +260,3 @@ module lsu_interconnect #(
     assign awprot  = 3'b000;
 
 endmodule
-
-
-

@@ -5,6 +5,8 @@ MEMORY
 {
   /* 4KB instruction memory (word-addressed imem behind the scenes) */
   IMEM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x00001000
+  /* IMEM read-only window for data loads (LSU alias) */
+  IMEM_WIN (r) : ORIGIN = 0x20000000, LENGTH = 0x00001000
   /* 4KB data memory (word-addressed dmem behind the scenes) */
   DMEM (rwx) : ORIGIN = 0x10000000, LENGTH = 0x00001000
 }
@@ -20,12 +22,10 @@ SECTIONS
     *(.text*)
   } > IMEM
 
-  .rodata : ALIGN(4)
-  {
-    *(.rodata*)
-  } > IMEM
+  /* Track end of IMEM load image after .text */
+  _imem_lma_end = .;
 
-  /* Initialized data lives in DMEM, with its init image stored in IMEM */
+  /* Initialized data/rodata live in DMEM, with their init image stored in IMEM */
   . = ORIGIN(DMEM);
 
   /* Reserve a small fixed area at the start of DMEM (dmem[0..3]).
@@ -45,6 +45,13 @@ SECTIONS
     _edata = .;
   } > DMEM AT > IMEM
   _sidata = LOADADDR(.data);
+
+  /* Read-only data in IMEM, accessed via LSU window at IMEM_WIN.
+     VMA = IMEM_WIN + (LMA - IMEM_BASE) so LSU window maps 1:1 to IMEM contents. */
+  .rodata ORIGIN(IMEM_WIN) + (_imem_lma_end - ORIGIN(IMEM)) : ALIGN(4)
+  {
+    *(.rodata*)
+  } > IMEM_WIN AT > IMEM
 
   /* Zero-initialized data in DMEM */
   .bss : ALIGN(4)

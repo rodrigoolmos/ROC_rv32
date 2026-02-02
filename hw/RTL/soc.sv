@@ -30,6 +30,11 @@ module soc #(
     logic [DATA_WIDTH-1:0]            data_imem_i;
     logic [ADDR_WIDTH-1:0]            imem_addr_cpu;
     logic [ADDR_WIDTH-1:0]            imem_addr_boot;
+    logic [ADDR_WIDTH-1:0]            imem_addr_lsu;
+    logic [DATA_WIDTH-1:0]            data_imem_lsu;
+    logic [ADDR_WIDTH-1:0]            imem_addr_b;
+    logic [DATA_WIDTH-1:0]            imem_din_b;
+    logic                             imem_we_b;
     logic                             we_i;
 
     // data memory
@@ -128,7 +133,8 @@ module soc #(
     // LSU Interconnect
     lsu_interconnect #(
         .ADDR_DMEM_WIDTH(ADDR_WIDTH),
-        .DMEM_BASE(DMEM_BASE)
+        .DMEM_BASE(DMEM_BASE),
+        .IMEM_BASE(32'h2000_0000)
     ) lsu_ic (
         .clk(clk),
         .nrst(rst_n),
@@ -139,6 +145,10 @@ module soc #(
         .addr_dmem(dmem_addr_cpu),
         .din_dmem(store_wdata),
         .dout_dmem(data_dmem_o),
+
+        // IMEM READ-ONLY INTERFACE
+        .addr_imem(imem_addr_lsu),
+        .dout_imem(data_imem_lsu),
 
         // AXI4-Lite MASTER INTERFACE
         .awaddr(awaddr),
@@ -352,6 +362,10 @@ module soc #(
     );
 
     // Instruction Memory (sync read)
+    assign imem_addr_b = (imem_we_b) ? imem_addr_boot : imem_addr_lsu;
+    assign imem_din_b  = data_imem_i;
+    assign imem_we_b   = we_i;
+
     imem #(
         .ADDR_WIDTH(ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH)
@@ -367,11 +381,11 @@ module soc #(
 
         // Port B DEBUG/DMA
         .en_b(1),
-        .we_b(we_i),
-        .wstrb_b(4'b1111),
-        .addr_b(imem_addr_boot),
-        .din_b(data_imem_i),
-        .dout_b()                // Not used
+        .we_b(imem_we_b),
+        .wstrb_b(imem_we_b ? 4'b1111 : 4'b0000),
+        .addr_b(imem_addr_b),
+        .din_b(imem_din_b),
+        .dout_b(data_imem_lsu)   // LSU read-only window
     );
 
     // Data Memory

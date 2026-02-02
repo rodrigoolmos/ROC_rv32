@@ -53,6 +53,7 @@ int main(void) {
     char signature_hada[4] = {'H', 'A', 'D', 'A'};
 
     print(addr_uart, "Start program\n\0");
+    printf_int(addr_uart, "Test print_int %d, %d\n\0", 6, 7);
 
 
     // Avoid local array initializers: they often compile into calls to memcpy
@@ -148,6 +149,8 @@ int main(void) {
     }
     
     print(addr_uart, "End program\n\0");
+    printf_int(addr_uart, "Test print_int \n\0%d, %d, %d, %d", 1, 2, 6, 7);
+
 
     okay(addr_dmem);
     // infinite loop to prevent function return

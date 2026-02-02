@@ -5,6 +5,11 @@
 
 hw/RTL/core/alu_ops_pkg.sv
 hw/RTL/core/rv32_opcodes_pkg.sv
+hw/RTL/peripherals/AXI-Lite-crossbar/axi_map_pkg.sv
+hw/RTL/peripherals/AXI-Lite-crossbar/axi_lite_crossbar.sv
+hw/RTL/peripherals/axi_uart/axi_s_to_fifos/axi_s_to_fifos.sv
+hw/RTL/peripherals/axi_uart/top_uart.sv
+hw/RTL/peripherals/axi_gpio/axi_lite_template/axi_lite_template.sv
 
 hw/RTL/bootloader/load_store_controller.sv
 hw/RTL/bootloader/uart_word_adapter.sv
@@ -22,7 +27,7 @@ hw/RTL/memory/imem.sv
 hw/RTL/memory/dmem.sv
 
 hw/RTL/peripherals/lsu_interconnect.sv
-hw/RTL/peripherals/axi_uart/axi_s_to_fifos/axi_lite_template/axi_lite_template.sv
+hw/RTL/peripherals/axi_gpio/axi_gpio.sv
 
 hw/RTL/soc.sv
 

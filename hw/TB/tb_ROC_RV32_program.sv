@@ -7,6 +7,10 @@ module tb_ROC_RV32_program;
 	logic rst_n;
 	logic rx;
 	logic tx;
+	logic uart_rx;
+	logic uart_tx;
+	logic led_status;
+	tri [31:0] pin_gpio;
 
 	parameter int CLK_FREQ = 50_000_000;
 	parameter int BAUD_RATE = 115200;
@@ -18,9 +22,13 @@ module tb_ROC_RV32_program;
 		.BAUD_RATE(BAUD_RATE)
 	) dut (
 		.clk(clk),
-		.rst_n(rst_n),
+		.rst(~rst_n),
+		.led_status(led_status),
 		.rx(rx),
-		.tx(tx)
+		.tx(tx),
+		.uart_rx(uart_rx),
+		.uart_tx(uart_tx),
+		.pin_gpio(pin_gpio)
 	);
 
 	initial clk = 1'b0;
@@ -157,6 +165,23 @@ module tb_ROC_RV32_program;
 		$display("----------------------------------");
 	endtask
 
+	// print handler for UART TX
+	initial begin
+		integer i;
+		logic [7:0] tx_byte;
+
+		forever begin
+			@(negedge uart_tx);
+			#(BIT_TIME / 2);
+			for (i = 0; i < 8; i++) begin
+				#BIT_TIME;
+				tx_byte[i] = uart_tx;
+			end
+			#BIT_TIME;
+			$write("%c", tx_byte);
+		end
+	end
+
 	// Monitor bootloader UART TX -> capture DMEM words
 	initial begin
 		integer i, j;
@@ -182,6 +207,7 @@ module tb_ROC_RV32_program;
 	initial begin
 		reset_dut();
 		rx = 1'b1;
+		uart_rx = 1'b1;
 
 		// Stop condition configuration:
 		// - default: stop on an exact store of 0xDEADBEEF to dmem[word 0]
@@ -236,12 +262,12 @@ module tb_ROC_RV32_program;
 			cycles++;
 
 			if (rst_n && dut.cpu_core.cpu_state == 3'd4) begin
-				$display("[WB] pc=0x%08x ir=0x%08x opcode=0x%02x rd=%0d rs1=%0d rs2=%0d", dut.cpu_core.pc_ir, dut.cpu_core.ir, dut.cpu_core.opcode, dut.cpu_core.rd, dut.cpu_core.rs1, dut.cpu_core.rs2);
+				//$display("[WB] pc=0x%08x ir=0x%08x opcode=0x%02x rd=%0d rs1=%0d rs2=%0d", dut.cpu_core.pc_ir, dut.cpu_core.ir, dut.cpu_core.opcode, dut.cpu_core.rd, dut.cpu_core.rs1, dut.cpu_core.rs2);
 			end
 
 			if (rst_n && dut.wena_mem_d) begin
 				store_count++;
-				$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr_cpu, dut.store_strb, dut.store_wdata);
+				//$display("[STORE] cycle=%0d addr_word=%0d wstrb=0x%0x wdata=0x%08x", cycles, dut.dmem_addr_cpu, dut.store_strb, dut.store_wdata);
 				if (dut.dmem_addr_cpu == stop_addr_word) begin
 					last_word0_wdata = dut.store_wdata;
 					// PASS: exact match of stop_wdata (default 0xDEADBEEF)

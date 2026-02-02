@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "stdio.h"
 
 #define OK_FLAG  0xDEADBEEFu
 #define ERR_FLAG 0xBAD00000u
@@ -7,7 +8,12 @@
 #define DMEM_BASE 0x10000000u
 
 // MMIO base address (must match MMIO in the RTL)
-#define MMIO_BASE 0x00000000u
+#define MMIO_GPIO 0x00000000u
+#define MMIO_REGS 0x00001000u
+#define MMIO_UART 0x00002000u
+
+// Number of regs in the MMIO_REGS block
+#define MMIO_REGS_NUM 16
 
 static void okay(volatile uint32_t *addr_dmem) {
     addr_dmem[0] = OK_FLAG;
@@ -17,11 +23,31 @@ static void fail(volatile uint32_t *addr_dmem, uint32_t code) {
     addr_dmem[0] = ERR_FLAG | (code & 0xFFFFu);
 }
 
+void set_dir_gpios_output(volatile uint32_t *addr_mmio, uint32_t pin_mask) {
+    addr_mmio[1] = pin_mask;
+}
+
+void set_gpios_value(volatile uint32_t *addr_mmio, uint32_t value) {
+    addr_mmio[0] = value;
+}
+
+void read_gpios_value(volatile uint32_t *addr_mmio, volatile uint32_t *addr_out) {
+    *addr_out = addr_mmio[0];
+}
+
+void wait_cycles(volatile uint32_t count) {
+    while (count--) {
+        __asm__ volatile ("nop");
+    }
+}
+
 int main(void) {
     int i, j;
-    uint32_t mmio_val = 0;
+    uint32_t regs_val = 0;
     volatile uint32_t *addr_dmem = (volatile uint32_t *)DMEM_BASE;
-    volatile uint32_t *addr_mmio = (volatile uint32_t *)MMIO_BASE;
+    volatile uint32_t *addr_gpio = (volatile uint32_t *)MMIO_GPIO;
+    volatile uint32_t *addr_regs = (volatile uint32_t *)MMIO_REGS;
+    volatile uint32_t *addr_uart = (volatile uint32_t *)MMIO_UART;
     char signature_roc[4] = {'R', 'O', 'C', 'V'};
     char signature_love[4] = {'L', 'O', 'V', 'E'};
     char signature_hada[4] = {'H', 'A', 'D', 'A'};
@@ -84,24 +110,47 @@ int main(void) {
     addr_dmem[3] = signature_hada[0] | ((uint32_t)signature_hada[1] << 8) |
                ((uint32_t)signature_hada[2] << 16) | ((uint32_t)signature_hada[3] << 24);
     addr_dmem[4] = acc;
+    addr_dmem[5] = 0xCAFEBABEu;
     
-    //MMIO test: write and read back
-    for (i = 0; i < 10; i++){
-        addr_mmio[i] = i;
-        mmio_val = addr_mmio[i];
-        if (mmio_val != i) {
-            fail(addr_dmem, i+ 0xA10);
+    //MMIO test: write and read back regs
+    for (i = 0; i < MMIO_REGS_NUM; i++){
+        addr_regs[i] = i;
+        regs_val = addr_regs[i];
+        if (regs_val != (uint32_t)i) {
+            fail(addr_dmem, (uint32_t)(i + 0xA10));
         }
     }
-    for (i = 0; i < 10; i++){
-        mmio_val = addr_mmio[i];
-        addr_mmio[i+10] = mmio_val+10;
-        mmio_val = addr_mmio[i+10];
-        if (mmio_val != i+10) {
-            fail(addr_dmem, i + 0xA10);
+    for (i = 0; i < MMIO_REGS_NUM; i++){
+        regs_val = addr_regs[i];
+        addr_regs[i] = regs_val+10;
+        regs_val = addr_regs[i];
+        if (regs_val != (uint32_t)(i + 10)) {
+            fail(addr_dmem, (uint32_t)(i + 0xA10));
         }
     }
 
+    set_dir_gpios_output(addr_gpio, 0xFFFF0000u);
+
+    print(addr_uart, "Hello world\n\0");
+    addr_uart[1] = 'A';
+    addr_uart[1] = 'B';
+    addr_uart[1] = 'C';
+    addr_uart[1] = 'D';
+    addr_uart[1] = 'E';
+    addr_uart[1] = 'F';
+    uint32_t pattern = 0x0000fu;
+    
+    for (;;){
+
+        set_gpios_value(addr_gpio, (pattern << 16));
+        pattern = (pattern << 1);
+        if (pattern == 0xf00000u){
+            pattern = 0x0000fu;
+        }
+        // print(addr_uart, "GPIO pattern updated\n\0");
+        wait_cycles(100u);
+    }
+    
 
     okay(addr_dmem);
     // infinite loop to prevent function return

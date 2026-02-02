@@ -21,7 +21,7 @@ module bram #(
 
   (* ram_style="block" *) logic [DATA_WIDTH-1:0] mem [0:(1<<ADDR_WIDTH)-1];
 
-  always_ff @(posedge clk) begin
+  always @(posedge clk) begin
     if (en_a) begin
       if (we_a) begin
         for (int i = 0; i < DATA_WIDTH/8; i++)
@@ -29,7 +29,9 @@ module bram #(
       end
       dout_a <= mem[addr_a];
     end
+  end
 
+  always @(posedge clk) begin
     if (en_b) begin
       if (we_b) begin
         for (int i = 0; i < DATA_WIDTH/8; i++)

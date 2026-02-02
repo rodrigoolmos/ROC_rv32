@@ -45,8 +45,10 @@ toolchain-check:
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(ELF): toolchain-check $(BUILD_DIR) $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_DIR)/link.ld
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SW_DIR)/crt0.S $(SW_APP_PATH)
+SW_COMMON_SRCS := $(SW_DIR)/stdio.c
+
+$(ELF): toolchain-check $(BUILD_DIR) $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_COMMON_SRCS) $(SW_DIR)/link.ld
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_COMMON_SRCS)
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@

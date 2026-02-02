@@ -7,3 +7,6 @@
 [submodule "hw/RTL/peripherals/AXI-Lite-crossbar"]
 	path = hw/RTL/peripherals/AXI-Lite-crossbar
 	url = https://github.com/rodrigoolmos/AXI-Lite-crossbar.git
+[submodule "hw/RTL/peripherals/axi-7seg-cntr"]
+	path = hw/RTL/peripherals/axi-7seg-cntr
+	url = https://github.com/rodrigoolmos/axi-7seg-cntr.git

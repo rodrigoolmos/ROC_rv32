@@ -27,6 +27,8 @@ module ROC_RV32 #(
     input   logic                    timer_irq
 );
 
+    localparam logic [31:0] INSN_MRET = 32'h3020_0073;
+
     logic [31:0] ir;
     
 
@@ -176,7 +178,7 @@ module ROC_RV32 #(
                     end
                 end
                 3'b000: begin
-                    if (ir == 32'h3020_0073) begin
+                    if (ir == INSN_MRET) begin
                         mret_commit = 1'b1;
                     end
                 end

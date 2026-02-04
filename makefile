@@ -28,7 +28,8 @@ SW_DIR := sw
 SW_APP ?= main.c
 SW_APP_PATH := $(SW_DIR)/$(SW_APP)
 
-CFLAGS  := -march=rv32i -mabi=ilp32 -O0 -g3 \
+# CSR instructions (csrr/csrw/csrsi/...) require Zicsr.
+CFLAGS  := -march=rv32izicsr -mabi=ilp32 -O0 -g3 \
 	-ffreestanding -fno-builtin \
 	-fno-builtin-memcpy -fno-builtin-memset -fno-builtin-memmove -fno-builtin-memcmp \
 	-fno-tree-loop-distribute-patterns \

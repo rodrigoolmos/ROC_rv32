@@ -10,6 +10,7 @@ hw/RTL/core/rv32_opcodes_pkg.sv
 hw/RTL/peripherals/AXI-Lite-crossbar/axi_map_pkg.sv
 hw/RTL/peripherals/AXI-Lite-crossbar/axi_lite_crossbar.sv
 hw/RTL/peripherals/axi_uart/axi_s_to_fifos/axi_s_to_fifos.sv
+hw/RTL/peripherals/axi_clint/axi_clint.sv
 hw/RTL/peripherals/axi_uart/top_uart.sv
 hw/RTL/peripherals/axi_gpio/axi_lite_template/axi_lite_template.sv
 
@@ -22,6 +23,7 @@ hw/RTL/core/register_bank.sv
 hw/RTL/core/decoder.sv
 hw/RTL/core/control_unit.sv
 hw/RTL/core/alu.sv
+hw/RTL/core/rv32_mtrap_csr.sv
 hw/RTL/core/ROC_RV32.sv
 
 hw/RTL/memory/mem.sv

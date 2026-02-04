@@ -5,7 +5,9 @@ module ROC_RV32 #(
     parameter int ADDR_WIDTH_I = 10,
     parameter int DATA_WIDTH_I = 32,
     parameter int ADDR_WIDTH_D = 10,
-    parameter int DATA_WIDTH_D = 32
+    parameter int DATA_WIDTH_D = 32,
+    parameter int N_EXT_IRQ = 8,
+    parameter logic [31:0] RESET_MTVEC = 32'h0000_1000
 ) (
     input  logic                               clk,
     input  logic                               rst_n,
@@ -21,7 +23,8 @@ module ROC_RV32 #(
     output  logic [3:0]              strb_cpu,
     output  logic [31:0]             addr_cpu,
     output  logic [31:0]             data_cpu_o,
-    input   logic [31:0]             data_cpu_i
+    input   logic [31:0]             data_cpu_i,
+    input   logic                    timer_irq
 );
 
     logic [31:0] ir;
@@ -49,6 +52,10 @@ module ROC_RV32 #(
     logic [31:0] pc_ir_plus4;
 
     logic        wena_reg;
+    logic        csr_wena;
+    logic [11:0] csr_addr;
+    logic [31:0] csr_wdata;
+    logic        mret_commit;
     logic [31:0] imm_ext;
     logic        alu_src1;
     logic        alu_src2;
@@ -66,6 +73,11 @@ module ROC_RV32 #(
     logic [31:0] do2;
 
     logic [31:0] alu_op1;
+    logic [31:0] csr_rdata;
+    logic        take_trap;
+    logic [31:0] trap_pc;
+    logic        take_return;
+    logic [31:0] return_pc;
 
     // Word-addressed memories (PC/result are byte addresses)
     assign imem_addr = pc_output[ADDR_WIDTH_I+1:2];
@@ -121,6 +133,89 @@ module ROC_RV32 #(
         .strb_cpu(strb_cpu)             // Byte write strobe for store
     );
 
+    // Decode minimal SYSTEM support needed by the machine-trap CSR block.
+    // SYSTEM instructions are retired in WB in this core.
+    always_comb begin
+        csr_wena = 1'b0;
+        csr_addr = imm_i;
+        csr_wdata = 32'b0;
+        mret_commit = 1'b0;
+
+        if (cpu_state == 3'd4 && opcode == OPC_SYSTEM) begin
+            unique case (funct3)
+                3'b001: begin // CSRRW
+                    csr_wena = 1'b1;
+                    csr_wdata = do1;
+                end
+                3'b010: begin // CSRRS
+                    if (rs1 != 5'b0) begin
+                        csr_wena = 1'b1;
+                        csr_wdata = csr_rdata | do1;
+                    end
+                end
+                3'b011: begin // CSRRC
+                    if (rs1 != 5'b0) begin
+                        csr_wena = 1'b1;
+                        csr_wdata = csr_rdata & ~do1;
+                    end
+                end
+                3'b101: begin // CSRRWI
+                    csr_wena = 1'b1;
+                    csr_wdata = {27'b0, rs1};
+                end
+                3'b110: begin // CSRRSI
+                    if (rs1 != 5'b0) begin
+                        csr_wena = 1'b1;
+                        csr_wdata = csr_rdata | {27'b0, rs1};
+                    end
+                end
+                3'b111: begin // CSRRCI
+                    if (rs1 != 5'b0) begin
+                        csr_wena = 1'b1;
+                        csr_wdata = csr_rdata & ~{27'b0, rs1};
+                    end
+                end
+                3'b000: begin
+                    if (ir == 32'h3020_0073) begin
+                        mret_commit = 1'b1;
+                    end
+                end
+                default: ;
+            endcase
+        end
+    end
+
+    // mtrap and CSR unit
+    rv32_mtrap_csr #(
+        .N_EXT_IRQ(N_EXT_IRQ),
+        .RESET_MTVEC(RESET_MTVEC)
+    ) mtrap_csr_ins (
+        .clk(clk),
+        .rst_n(rst_n),
+
+        // Interrupt lines from peripherals
+        .irq_software(1'b0),
+        .irq_timer(timer_irq),
+        .irq_external('0),
+
+        .mret_commit(mret_commit),
+
+        .csr_wena(csr_wena),
+        .csr_addr(csr_addr),
+        .csr_wdata(csr_wdata),
+        .csr_rdata(csr_rdata),
+
+        // Trap decision point (commit point)
+        .instr_commit(cpu_state == 3'd4),
+        .actual_pc(pc_output),
+
+        // Trap control outputs to CPU
+        .take_trap(take_trap),
+        .trap_pc(trap_pc),
+        .take_return(take_return),
+        .return_pc(return_pc)
+    );
+
     // decoder
     decoder decoder_ins(
         .instruction(ir),
@@ -146,6 +241,10 @@ module ROC_RV32 #(
         .opcode(opcode),
         .result(result),
         .branch_invert(branch_invert),
+        .take_trap(take_trap),
+        .trap_pc(trap_pc),
+        .take_return(take_return),
+        .return_pc(return_pc),
         .pc_ir(pc_ir),
         .imm_ext(imm_ext),
         .do1(do1),
@@ -174,13 +273,17 @@ module ROC_RV32 #(
 
     // register bank
     always_comb begin
-        case (data_2_reg)
-            2'b00: reg_di = alu_out;          // From ALUOut
-            2'b01: reg_di = load_ext;         // From Memory (extended)
-            2'b10: reg_di = pc_ir_plus4;      // From instr PC + 4
-            2'b11: reg_di = imm_ext;          // From IMM
-            default: reg_di = 32'b0;
-        endcase
+        if (opcode == OPC_SYSTEM && funct3 != 3'b000) begin
+            reg_di = csr_rdata;               // CSR* writes old CSR value to rd
+        end else begin
+            case (data_2_reg)
+                2'b00: reg_di = alu_out;      // From ALUOut
+                2'b01: reg_di = load_ext;     // From Memory (extended)
+                2'b10: reg_di = pc_ir_plus4;  // From instr PC + 4
+                2'b11: reg_di = imm_ext;      // From IMM
+                default: reg_di = 32'b0;
+            endcase
+        end
     end
     register_bank register_bank_ins(
         .clk(clk),

@@ -25,6 +25,9 @@ module soc #(
 
     assign rst_n = ~rst;
 
+    // Timer IRQ
+    logic                             timer_irq;
+
     // instruction memory
     logic [DATA_WIDTH-1:0]            data_imem_o;
     logic [DATA_WIDTH-1:0]            data_imem_i;
@@ -78,13 +81,15 @@ module soc #(
     logic                     rready;
 
     localparam int AXI_ADDR_WIDTH = 32;
-    localparam int AXI_NUM_SLAVES = 3;
-    localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_BASE = 32'h0000_0000;
-    localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_MASK = 32'h0000_0FFF;
-    localparam logic [AXI_ADDR_WIDTH-1:0] REG_BASE  = 32'h0000_1000;
-    localparam logic [AXI_ADDR_WIDTH-1:0] REG_MASK  = 32'h0000_0FFF;
-    localparam logic [AXI_ADDR_WIDTH-1:0] UART_BASE = 32'h0000_2000;
-    localparam logic [AXI_ADDR_WIDTH-1:0] UART_MASK = 32'h0000_0FFF;
+    localparam int AXI_NUM_SLAVES = 4;
+    localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_BASE  = 32'h0000_0000;
+    localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_MASK  = 32'h0000_0FFF;
+    localparam logic [AXI_ADDR_WIDTH-1:0] REG_BASE   = 32'h0000_1000;
+    localparam logic [AXI_ADDR_WIDTH-1:0] REG_MASK   = 32'h0000_0FFF;
+    localparam logic [AXI_ADDR_WIDTH-1:0] UART_BASE  = 32'h0000_2000;
+    localparam logic [AXI_ADDR_WIDTH-1:0] UART_MASK  = 32'h0000_0FFF;
+    localparam logic [AXI_ADDR_WIDTH-1:0] CLINT_BASE = 32'h0000_3000;
+    localparam logic [AXI_ADDR_WIDTH-1:0] CLINT_MASK = 32'h0000_0FFF;
 
     // AXI4-Lite SLAVE INTERFACE arrays (crossbar -> peripherals)
     logic [AXI_ADDR_WIDTH-1:0] awaddr_s [AXI_NUM_SLAVES-1:0];
@@ -127,7 +132,9 @@ module soc #(
         .strb_cpu(strb_lsu),
         .addr_cpu(addr_lsu),
         .data_cpu_o(data_lsu_i),
-        .data_cpu_i(data_lsu_o)
+        .data_cpu_i(data_lsu_o),
+        // Interrupts
+        .timer_irq(timer_irq)
     );
 
     // LSU Interconnect
@@ -192,9 +199,10 @@ module soc #(
         .DATA_WIDTH(DATA_WIDTH),
         .NUM_SLAVES(AXI_NUM_SLAVES),
         .SLAVE_MAP('{
-            '{base: GPIO_BASE, mask: GPIO_MASK},
-            '{base: REG_BASE,  mask: REG_MASK},
-            '{base: UART_BASE, mask: UART_MASK}
+            '{base: GPIO_BASE,  mask: GPIO_MASK},
+            '{base: REG_BASE,   mask: REG_MASK},
+            '{base: UART_BASE,  mask: UART_MASK},
+            '{base: CLINT_BASE, mask: CLINT_MASK}
         })
     ) axi_xbar (
         .clk(clk),
@@ -333,7 +341,7 @@ module soc #(
 
         // AXI4-Lite SLAVE (crossbar slave 2)
         .awaddr(awaddr_s[2]),
-        .awprot({1'b0, awprot_s[2]}),
+        .awprot(awprot_s[2]),
         .awvalid(awvalid_s[2]),
         .awready(awready_s[2]),
 
@@ -347,7 +355,7 @@ module soc #(
         .bready(bready_s[2]),
 
         .araddr(araddr_s[2]),
-        .arprot({1'b0, arprot_s[2]}),
+        .arprot(arprot_s[2]),
         .arvalid(arvalid_s[2]),
         .arready(arready_s[2]),
 
@@ -359,6 +367,43 @@ module soc #(
         // UART interface
         .rx(uart_rx),
         .tx(uart_tx)
+    );
+
+    // AXI4-Lite clint peripheral
+    axi_clint #(
+        .ADDR_WIDTH(6),
+        .DATA_WIDTH(DATA_WIDTH)
+    ) axi_clint_i (
+        .clk(clk),
+        .nrst(rst_n),
+
+        // AXI4-Lite SLAVE (crossbar slave 2)
+        .awaddr(awaddr_s[3]),
+        .awprot(awprot_s[3]),
+        .awvalid(awvalid_s[3]),
+        .awready(awready_s[3]),
+
+        .wdata(wdata_s[3]),
+        .wstrb(wstrb_s[3]),
+        .wvalid(wvalid_s[3]),
+        .wready(wready_s[3]),
+
+        .bresp(bresp_s[3]),
+        .bvalid(bvalid_s[3]),
+        .bready(bready_s[3]),
+
+        .araddr(araddr_s[3]),
+        .arprot(arprot_s[3]),
+        .arvalid(arvalid_s[3]),
+        .arready(arready_s[3]),
+
+        .rdata(rdata_s[3]),
+        .rresp(rresp_s[3]),
+        .rvalid(rvalid_s[3]),
+        .rready(rready_s[3]),
+
+        // Timer interrupt output
+        .timer_irq(timer_irq)
     );
 
     // Instruction Memory (sync read)

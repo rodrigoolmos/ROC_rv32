@@ -1,161 +1,228 @@
 #include <stdint.h>
-#include "stdio.h"
 
 #define OK_FLAG  0xDEADBEEFu
 #define ERR_FLAG 0xBAD00000u
 
-// DMEM base address (must match DMEM_BASE in the RTL)
-#define DMEM_BASE 0x10000000u
+#define DMEM_BASE  0x10000000u
+#define MMIO_REGS  0x00001000u
+#define MMIO_CLINT 0x00003000u
 
-// MMIO base address (must match MMIO in the RTL)
-#define MMIO_GPIO 0x00000000u
-#define MMIO_REGS 0x00001000u
-#define MMIO_UART 0x00002000u
+#define CLINT_MTIME_L    (*(volatile uint32_t *)(MMIO_CLINT + 0x00u))
+#define CLINT_MTIME_H    (*(volatile uint32_t *)(MMIO_CLINT + 0x04u))
+#define CLINT_MTIMECMP_L (*(volatile uint32_t *)(MMIO_CLINT + 0x08u))
+#define CLINT_MTIMECMP_H (*(volatile uint32_t *)(MMIO_CLINT + 0x0Cu))
 
-// Number of regs in the MMIO_REGS block
-#define MMIO_REGS_NUM 16
+#define MCAUSE_MTI       0x80000007u
+#define MTIE_MASK        (1u << 7)
+#define MSTATUS_MIE_MASK (1u << 3)
 
-static void okay(volatile uint32_t *addr_dmem) {
-    addr_dmem[0] = OK_FLAG;
-}
+#define TIMER_PERIOD     3000u
+#define IRQ_TIMEOUT      2500000u
 
-static void fail(volatile uint32_t *addr_dmem, uint32_t code) {
-    addr_dmem[0] = ERR_FLAG | (code & 0xFFFFu);
-}
+static volatile uint32_t irq_count;
+static volatile uint32_t bad_mcause;
+static volatile uint32_t nested_irq;
+static volatile uint32_t bad_mie_in_handler;
+static volatile uint32_t bad_mepc_align;
+static volatile uint32_t bad_mepc_range;
+static volatile uint32_t delta_samples;
+static volatile uint32_t delta_min;
+static volatile uint32_t delta_max;
+static volatile uint32_t prev_mtime_lo;
+static volatile uint32_t in_handler;
+static volatile uint32_t last_mcause;
+static volatile uint32_t last_mepc;
 
-void set_dir_gpios_output(volatile uint32_t *addr_mmio, uint32_t pin_mask) {
-    addr_mmio[1] = pin_mask;
-}
-
-void set_gpios_value(volatile uint32_t *addr_mmio, uint32_t value) {
-    addr_mmio[0] = value;
-}
-
-void read_gpios_value(volatile uint32_t *addr_mmio, volatile uint32_t *addr_out) {
-    *addr_out = addr_mmio[0];
-}
-
-void wait_cycles(volatile uint32_t count) {
-    while (count--) {
+static void wait_cycles(uint32_t n) {
+    while (n--) {
         __asm__ volatile ("nop");
     }
 }
 
+void __attribute__((interrupt("machine"))) trap_handler(void) {
+    uint32_t mcause;
+    uint32_t mstatus;
+    uint32_t mepc;
+    uint32_t now_lo;
+    uint32_t now_hi;
+    uint32_t next_lo;
+    uint32_t next_hi;
+
+    in_handler++;
+    if (in_handler > 1u) {
+        nested_irq++;
+    }
+
+    __asm__ volatile ("csrr %0, mcause" : "=r"(mcause));
+    __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus));
+    __asm__ volatile ("csrr %0, mepc" : "=r"(mepc));
+
+    now_lo = CLINT_MTIME_L;
+    now_hi = CLINT_MTIME_H;
+
+    last_mcause = mcause;
+    last_mepc = mepc;
+
+    if (mcause != MCAUSE_MTI) {
+        bad_mcause++;
+    }
+    if (mstatus & MSTATUS_MIE_MASK) {
+        bad_mie_in_handler++;
+    }
+    if (mepc & 1u) {
+        bad_mepc_align++;
+    }
+    if ((mepc & 0xFFFFF000u) != 0u) {
+        bad_mepc_range++;
+    }
+
+    if (irq_count != 0u) {
+        uint32_t d = now_lo - prev_mtime_lo;
+        if (d < delta_min) {
+            delta_min = d;
+        }
+        if (d > delta_max) {
+            delta_max = d;
+        }
+        delta_samples++;
+    }
+    prev_mtime_lo = now_lo;
+    irq_count++;
+
+    next_lo = now_lo + TIMER_PERIOD;
+    next_hi = now_hi + ((next_lo < now_lo) ? 1u : 0u);
+
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = next_lo;
+    CLINT_MTIMECMP_H = next_hi;
+
+    in_handler--;
+}
+
 int main(void) {
-    int i, j;
-    uint32_t regs_val = 0;
-    volatile uint32_t *addr_dmem = (volatile uint32_t *)DMEM_BASE;
-    volatile uint32_t *addr_gpio = (volatile uint32_t *)MMIO_GPIO;
-    volatile uint32_t *addr_regs = (volatile uint32_t *)MMIO_REGS;
-    volatile uint32_t *addr_uart = (volatile uint32_t *)MMIO_UART;
-    char signature_roc[4] = {'R', 'O', 'C', 'V'};
-    char signature_love[4] = {'L', 'O', 'V', 'E'};
-    char signature_hada[4] = {'H', 'A', 'D', 'A'};
+    uint32_t i;
+    uint32_t phase_count;
+    uint32_t timeout;
+    uint32_t fail_code;
+    volatile uint32_t *dmem = (volatile uint32_t *)DMEM_BASE;
+    volatile uint32_t *regs = (volatile uint32_t *)MMIO_REGS;
 
-    print(addr_uart, "Start program\n\0");
-    printf_int(addr_uart, "Test print_int %d, %d\n\0", 6, 7);
+#define CHECK(cond, code) do { if (!(cond)) { fail_code = (code); goto fail; } } while (0)
 
+    irq_count = 0;
+    bad_mcause = 0;
+    nested_irq = 0;
+    bad_mie_in_handler = 0;
+    bad_mepc_align = 0;
+    bad_mepc_range = 0;
+    delta_samples = 0;
+    delta_min = 0xFFFFffffu;
+    delta_max = 0u;
+    prev_mtime_lo = 0u;
+    in_handler = 0u;
+    last_mcause = 0u;
+    last_mepc = 0u;
+    fail_code = 0u;
 
-    // Avoid local array initializers: they often compile into calls to memcpy
-    // (and with -nostdlib that breaks the link).
-    // Instead generate the patterns directly.
-
-    for (i = 0; i < 16; i++) {
-        addr_dmem[i] = i;
+    for (i = 1; i < 16u; i++) {
+        dmem[i] = 0u;
     }
 
-    for (j = 0; j < 16; j++) {
-        addr_dmem[j + i] = addr_dmem[j] + addr_dmem[j];
+    __asm__ volatile ("csrw mtvec, %0" :: "r"((uint32_t)(uintptr_t)trap_handler));
+
+    __asm__ volatile ("csrc mstatus, %0" :: "r"(MSTATUS_MIE_MASK));
+    __asm__ volatile ("csrc mie, %0" :: "r"(MTIE_MASK));
+
+    // Phase 1: both disabled -> no interrupts.
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = CLINT_MTIME_L + 64u;
+    CLINT_MTIMECMP_H = CLINT_MTIME_H;
+    wait_cycles(TIMER_PERIOD * 4u);
+    CHECK(irq_count == 0u, 0x0101u);
+
+    // Phase 2: MTIE on, global off -> no interrupts.
+    __asm__ volatile ("csrs mie, %0" :: "r"(MTIE_MASK));
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = CLINT_MTIME_L + 64u;
+    CLINT_MTIMECMP_H = CLINT_MTIME_H;
+    wait_cycles(TIMER_PERIOD * 4u);
+    CHECK(irq_count == 0u, 0x0102u);
+
+    // Phase 3: enable global MIE -> interrupts must arrive.
+    __asm__ volatile ("csrs mstatus, %0" :: "r"(MSTATUS_MIE_MASK));
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = CLINT_MTIME_L + 64u;
+    CLINT_MTIMECMP_H = CLINT_MTIME_H;
+    timeout = IRQ_TIMEOUT;
+    while ((timeout-- != 0u) && (irq_count < 8u)) {
+        __asm__ volatile ("nop");
+    }
+    CHECK(irq_count >= 8u, 0x0103u);
+
+    // Small stress loop while IRQs are active.
+    for (i = 0; i < 2000u; i++) {
+        regs[i & 0xFu] = i ^ 0xA5A50000u;
+        (void)regs[i & 0xFu];
     }
 
-    // Fill a larger word pattern and compute a checksum.
-    uint32_t checksum = 0;
-    for (j = 0; j < 32; j++) {
-        uint32_t v = (uint32_t)(j * 3 + 1) ^ 0xA5A5u;
-        addr_dmem[32 + j] = v;
-        checksum ^= v + (uint32_t)j;
+    // Phase 4: global MIE off -> counter must stop.
+    phase_count = irq_count;
+    __asm__ volatile ("csrc mstatus, %0" :: "r"(MSTATUS_MIE_MASK));
+    wait_cycles(TIMER_PERIOD * 6u);
+    CHECK(irq_count == phase_count, 0x0104u);
+
+    // Phase 5: global MIE on -> counter must continue.
+    __asm__ volatile ("csrs mstatus, %0" :: "r"(MSTATUS_MIE_MASK));
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = CLINT_MTIME_L + 64u;
+    CLINT_MTIMECMP_H = CLINT_MTIME_H;
+    timeout = IRQ_TIMEOUT;
+    while ((timeout-- != 0u) && (irq_count < (phase_count + 6u))) {
+        __asm__ volatile ("nop");
+    }
+    CHECK(irq_count >= (phase_count + 6u), 0x0105u);
+
+    // Phase 6: MTIE off with global on -> counter must stop.
+    phase_count = irq_count;
+    __asm__ volatile ("csrc mie, %0" :: "r"(MTIE_MASK));
+    wait_cycles(TIMER_PERIOD * 6u);
+    CHECK(irq_count == phase_count, 0x0106u);
+
+    // Phase 7: MTIE on again -> counter must continue.
+    __asm__ volatile ("csrs mie, %0" :: "r"(MTIE_MASK));
+    CLINT_MTIMECMP_H = 0xFFFFffffu;
+    CLINT_MTIMECMP_L = CLINT_MTIME_L + 64u;
+    CLINT_MTIMECMP_H = CLINT_MTIME_H;
+    timeout = IRQ_TIMEOUT;
+    while ((timeout-- != 0u) && (irq_count < (phase_count + 4u))) {
+        __asm__ volatile ("nop");
+    }
+    CHECK(irq_count >= (phase_count + 4u), 0x0107u);
+
+    CHECK(bad_mcause == 0u, 0x0201u);
+    CHECK(nested_irq == 0u, 0x0202u);
+    CHECK(bad_mie_in_handler == 0u, 0x0203u);
+    CHECK(bad_mepc_align == 0u, 0x0204u);
+    CHECK(bad_mepc_range == 0u, 0x0205u);
+    CHECK(delta_samples >= 4u, 0x0206u);
+
+fail:
+    dmem[1]  = irq_count;
+    dmem[2]  = (bad_mcause & 0xFFFFu) | ((nested_irq & 0xFFFFu) << 16);
+    dmem[3]  = (bad_mie_in_handler & 0xFFFFu) | ((bad_mepc_align & 0xFFFFu) << 16);
+    dmem[4]  = (bad_mepc_range & 0xFFFFu) | ((delta_samples & 0xFFFFu) << 16);
+    dmem[5]  = last_mcause;
+    dmem[6]  = last_mepc;
+    dmem[7]  = delta_min;
+    dmem[8]  = delta_max;
+
+    if (fail_code != 0u) {
+        dmem[0] = ERR_FLAG | (fail_code & 0xFFFFu);
+    } else {
+        dmem[0] = OK_FLAG;
     }
 
-    for (j = 0; j < 16; j++) {
-        if ((int)addr_dmem[j] != j) {
-            fail(addr_dmem, (uint32_t)j);
-        }
-    }
-
-    for (j = 0; j < 16; j++) {
-        int expected = 2 * j;
-        if ((int)addr_dmem[j + i] != expected) {
-            fail(addr_dmem, (uint32_t)(j + i));
-        }
-    }
-
-    // Verify word pattern and checksum.
-    uint32_t chk2 = 0;
-    for (j = 0; j < 32; j++) {
-        uint32_t v = (uint32_t)(j * 3 + 1) ^ 0xA5A5u;
-        if (addr_dmem[32 + j] != v) {
-            fail(addr_dmem, (uint32_t)(32 + j));
-        }
-        chk2 ^= v + (uint32_t)j;
-    }
-    if (chk2 != checksum) {
-        fail(addr_dmem, 0x1234u);
-    }
-
-    // Simple data-dependent loop to exercise ALU and branch paths.
-    uint32_t acc = 0;
-    for (j = 0; j < 64; j++) {
-        acc += (j & 1) ? (j * 7u) : (j ^ 0x55u);
-    }
-    addr_dmem[1] = signature_roc[0] | ((uint32_t)signature_roc[1] << 8) |
-               ((uint32_t)signature_roc[2] << 16) | ((uint32_t)signature_roc[3] << 24);
-    addr_dmem[2] = signature_love[0] | ((uint32_t)signature_love[1] << 8) |
-               ((uint32_t)signature_love[2] << 16) | ((uint32_t)signature_love[3] << 24);
-    addr_dmem[3] = signature_hada[0] | ((uint32_t)signature_hada[1] << 8) |
-               ((uint32_t)signature_hada[2] << 16) | ((uint32_t)signature_hada[3] << 24);
-    addr_dmem[4] = acc;
-    addr_dmem[5] = 0xCAFEBABEu;
-    
-    //MMIO test: write and read back regs
-    for (i = 0; i < MMIO_REGS_NUM; i++){
-        addr_regs[i] = i;
-        regs_val = addr_regs[i];
-        if (regs_val != (uint32_t)i) {
-            fail(addr_dmem, (uint32_t)(i + 0xA10));
-        }
-    }
-    for (i = 0; i < MMIO_REGS_NUM; i++){
-        regs_val = addr_regs[i];
-        addr_regs[i] = regs_val+10;
-        regs_val = addr_regs[i];
-        if (regs_val != (uint32_t)(i + 10)) {
-            fail(addr_dmem, (uint32_t)(i + 0xA10));
-        }
-    }
-
-    set_dir_gpios_output(addr_gpio, 0xFFFF0000u);
-
-    uint32_t pattern = 0x0000fu;
-    
-    for (int i=0; i<100; i++){
-
-        set_gpios_value(addr_gpio, (pattern << 16));
-        pattern = (pattern << 1);
-        if (pattern == 0xf00000u){
-            pattern = 0x0000fu;
-        }
-        // print(addr_uart, "GPIO pattern updated\n\0");
-        wait_cycles(100u);
-    }
-    
-    print(addr_uart, "End program\n\0");
-    printf_int(addr_uart, "Test print_int \n\0%d, %d, %d, %d", 1, 2, 6, 7);
-
-
-    okay(addr_dmem);
-    // infinite loop to prevent function return
     for (;;) {
         __asm__ volatile ("wfi");
     }
-
 }

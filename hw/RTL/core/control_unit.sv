@@ -212,6 +212,7 @@ module control_unit(
                 OPC_OP,
                 OPC_OP_IMM,
                 OPC_AUIPC: data_2_reg = 2'b00; // R/I/AUIPC -> ALU
+                OPC_SYSTEM: data_2_reg = 2'b00; // SYSTEM uses dedicated WB path in top
                 default:    data_2_reg = 2'b00; // don't care / safe default
             endcase
         end
@@ -229,6 +230,7 @@ module control_unit(
                 OPC_JALR:   wena_reg = 1'b1; // JALR
                 OPC_LUI:    wena_reg = 1'b1; // LUI
                 OPC_AUIPC:  wena_reg = 1'b1; // AUIPC
+                OPC_SYSTEM: wena_reg = (funct3 != 3'b000); // CSR* writes old CSR to rd
                 default:    wena_reg = 1'b0;
             endcase
         end

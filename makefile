@@ -58,7 +58,7 @@ $(ASM): $(ELF)
 	$(OBJDUMP) -d -S $< > $@
 
 $(IMEM_DAT): $(BIN) tools/bin2imem.py
-	python3 tools/bin2imem.py $(BIN) $(IMEM_DAT) --words 1024
+	python3 tools/bin2imem.py $(BIN) $(IMEM_DAT) --words 2048
 
 clean:
 	rm -rf $(BUILD_DIR) $(IMEM_DAT)

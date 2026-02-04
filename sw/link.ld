@@ -3,12 +3,12 @@ ENTRY(_start)
 
 MEMORY
 {
-  /* 4KB instruction memory (word-addressed imem behind the scenes) */
-  IMEM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x00001000
+  /* 8KB instruction memory (word-addressed imem behind the scenes) */
+  IMEM (rx)  : ORIGIN = 0x00000000, LENGTH = 0x00002000
   /* IMEM read-only window for data loads (LSU alias) */
-  IMEM_WIN (r) : ORIGIN = 0x20000000, LENGTH = 0x00001000
-  /* 4KB data memory (word-addressed dmem behind the scenes) */
-  DMEM (rwx) : ORIGIN = 0x10000000, LENGTH = 0x00001000
+  IMEM_WIN (r) : ORIGIN = 0x20000000, LENGTH = 0x00002000
+  /* 8KB data memory (word-addressed dmem behind the scenes) */
+  DMEM (rwx) : ORIGIN = 0x10000000, LENGTH = 0x00002000
 }
 
 SECTIONS

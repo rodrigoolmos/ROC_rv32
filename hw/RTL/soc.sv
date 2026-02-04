@@ -1,7 +1,8 @@
 module soc #(
     parameter CLK_FREQ = 100_000_000,
     parameter BAUD_RATE = 115200,
-    parameter int ADDR_WIDTH = 10,
+    // 11 -> 2^11 words = 2048 words = 8KB
+    parameter int ADDR_WIDTH = 11,
     parameter int DATA_WIDTH = 32,
     // Base address for data memory (Harvard mapping).
     // All LOAD/STORE addresses are expected to be in [DMEM_BASE, DMEM_BASE + 4*2**ADDR_WIDTH_D).

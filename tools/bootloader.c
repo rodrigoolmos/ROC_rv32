@@ -11,7 +11,7 @@
 #define DEFAULT_PORT "/dev/ttyUSB0"
 #define DEFAULT_IMEM "sw/imem.dat"
 #define BAUD_RATE B115200
-#define MAX_WORDS 1024
+#define MAX_WORDS 2048
 #define CHUNK_WORDS 128
 
 static void usage(const char *prog) {
@@ -21,7 +21,7 @@ static void usage(const char *prog) {
             "  %s -addr <word> -ndata <n> -read [-port <dev>]\n"
             "\n"
             "Notes:\n"
-            "  -addr is a word address (0..1023). Baudrate is fixed at 115200.\n",
+            "  -addr is a word address (0..2047). Baudrate is fixed at 115200.\n",
             prog, prog);
 }
 

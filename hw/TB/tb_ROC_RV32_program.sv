@@ -14,12 +14,16 @@ module tb_ROC_RV32_program;
 
 	parameter int CLK_FREQ = 50_000_000;
 	parameter int BAUD_RATE = 115200;
+	parameter int ADDR_WIDTH = 11;
+	parameter int DATA_WIDTH = 32;
 	parameter int NANOS_PER_SEC = 1_000_000_000;
 	localparam time BIT_TIME = NANOS_PER_SEC / BAUD_RATE;
 
 	soc #(
 		.CLK_FREQ(CLK_FREQ),
-		.BAUD_RATE(BAUD_RATE)
+		.BAUD_RATE(BAUD_RATE),
+		.ADDR_WIDTH(ADDR_WIDTH),
+		.DATA_WIDTH(DATA_WIDTH)
 	) dut (
 		.clk(clk),
 		.rst(~rst_n),
@@ -137,7 +141,7 @@ module tb_ROC_RV32_program;
 		if (imem_image.size() == 0) begin
 			$fatal(1, "IMEM image is empty");
 		end
-		if (imem_image.size() > (1<<10)) begin
+		if (imem_image.size() > (1<<ADDR_WIDTH)) begin
 			$fatal(1, "IMEM image too large: %0d words", imem_image.size());
 		end
 

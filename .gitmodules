@@ -10,3 +10,6 @@
 [submodule "hw/RTL/peripherals/axi-7seg-cntr"]
 	path = hw/RTL/peripherals/axi-7seg-cntr
 	url = https://github.com/rodrigoolmos/axi-7seg-cntr.git
+[submodule "hw/RTL/peripherals/axi_clint"]
+	path = hw/RTL/peripherals/axi_clint
+	url = https://github.com/rodrigoolmos/axi_clint.git

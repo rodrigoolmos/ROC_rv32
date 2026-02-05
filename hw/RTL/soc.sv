@@ -1,6 +1,7 @@
 module soc #(
     parameter CLK_FREQ = 100_000_000,
     parameter BAUD_RATE = 115200,
+    parameter int N_EXT_IRQ = 8,
     // 11 -> 2^11 words = 2048 words = 8KB
     parameter int ADDR_WIDTH = 11,
     parameter int DATA_WIDTH = 32,
@@ -26,8 +27,10 @@ module soc #(
 
     assign rst_n = ~rst;
 
-    // Timer IRQ
+    // IRQ
     logic                             timer_irq;
+    logic [N_EXT_IRQ-1:0]             external_irq;
+    logic                             gpio_irq;
 
     // instruction memory
     logic [DATA_WIDTH-1:0]            data_imem_o;
@@ -113,12 +116,19 @@ module soc #(
     logic                      rvalid_s [AXI_NUM_SLAVES-1:0];
     logic                      rready_s [AXI_NUM_SLAVES-1:0];
 
+    // IRQs to CPU
+    always_comb begin
+        external_irq = '0;
+        external_irq[0] = gpio_irq;
+    end
+
     // Core CPU
     ROC_RV32 #(
         .ADDR_WIDTH_I(ADDR_WIDTH),
         .DATA_WIDTH_I(DATA_WIDTH),
         .ADDR_WIDTH_D(ADDR_WIDTH),
-        .DATA_WIDTH_D(DATA_WIDTH)
+        .DATA_WIDTH_D(DATA_WIDTH),
+        .N_EXT_IRQ(N_EXT_IRQ)
     ) cpu_core (
         .clk(clk),
         .rst_n(rst_n),
@@ -135,7 +145,8 @@ module soc #(
         .data_cpu_o(data_lsu_i),
         .data_cpu_i(data_lsu_o),
         // Interrupts
-        .timer_irq(timer_irq)
+        .timer_irq(timer_irq),
+        .external_irq(external_irq)
     );
 
     // LSU Interconnect
@@ -293,8 +304,12 @@ module soc #(
         .rresp(rresp_s[0]),
         .rvalid(rvalid_s[0]),
         .rready(rready_s[0]),
+        
         // GPIO
-        .pin_gpio(pin_gpio)
+        .pin_gpio(pin_gpio),
+
+        // Interrupt
+        .interrupt(gpio_irq)
     );
 
     // AXI4-Lite REGs peripheral

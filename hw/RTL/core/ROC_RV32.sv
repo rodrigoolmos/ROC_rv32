@@ -24,7 +24,8 @@ module ROC_RV32 #(
     output  logic [31:0]             addr_cpu,
     output  logic [31:0]             data_cpu_o,
     input   logic [31:0]             data_cpu_i,
-    input   logic                    timer_irq
+    input   logic                    timer_irq,
+    input   logic [N_EXT_IRQ-1:0]    external_irq
 );
 
     localparam logic [31:0] INSN_MRET = 32'h3020_0073;
@@ -198,7 +199,7 @@ module ROC_RV32 #(
         // Interrupt lines from peripherals
         .irq_software(1'b0),
         .irq_timer(timer_irq),
-        .irq_external('0),
+        .irq_external(external_irq),
 
         .mret_commit(mret_commit),
 

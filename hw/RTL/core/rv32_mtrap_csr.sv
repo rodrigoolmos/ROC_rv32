@@ -36,7 +36,7 @@ module rv32_mtrap_csr #(
     localparam logic [11:0] CSR_MEPC    = 12'h341;
     localparam logic [11:0] CSR_MCAUSE  = 12'h342;
     localparam logic [11:0] CSR_MIP     = 12'h344;
-    localparam logic [11:0] CSR_CUSTOM0 = 12'hF00;
+    localparam logic [11:0] CSR_EXT_INT = 12'hF00;
 
     localparam int MSTATUS_MIE_BIT = 3;
     localparam int MSTATUS_MPIE_BIT = 7;
@@ -54,7 +54,7 @@ module rv32_mtrap_csr #(
     logic [31:0] mepc;
     logic [31:0] mcause;
     logic [31:0] mip;
-    logic [31:0] custom0;
+    logic [31:0] ext_int;
 
     logic global_ie;
     logic pend_swi;
@@ -111,7 +111,7 @@ module rv32_mtrap_csr #(
             CSR_MEPC:    csr_rdata = mepc;
             CSR_MCAUSE:  csr_rdata = mcause;
             CSR_MIP:     csr_rdata = mip;
-            CSR_CUSTOM0: csr_rdata = custom0;
+            CSR_EXT_INT: csr_rdata = ext_int;
             default:     csr_rdata = 32'b0;
         endcase
     end
@@ -124,7 +124,6 @@ module rv32_mtrap_csr #(
             mtvec <= {RESET_MTVEC[31:2], 2'b00};
             mepc <= 32'b0;
             mcause <= 32'b0;
-            custom0 <= 32'b0;
         end else begin
             if (take_trap) begin
                 mepc <= {actual_pc[31:1], 1'b0};
@@ -149,10 +148,19 @@ module rv32_mtrap_csr #(
                     CSR_MTVEC: mtvec <= {csr_wdata[31:2], 2'b00};
                     CSR_MEPC: mepc <= {csr_wdata[31:1], 1'b0};
                     CSR_MCAUSE: mcause <= csr_wdata;
-                    CSR_CUSTOM0: custom0 <= csr_wdata;
                     default: ;
                 endcase
             end
+        end
+    end
+
+    // Set external interrupt source 
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ext_int <= 32'b0;
+        end else begin
+            ext_int <= {{32-N_EXT_IRQ{1'b0}}, irq_external};
         end
     end
 

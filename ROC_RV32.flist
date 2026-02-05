@@ -13,6 +13,7 @@ hw/RTL/peripherals/axi_uart/axi_s_to_fifos/axi_s_to_fifos.sv
 hw/RTL/peripherals/axi_clint/axi_clint.sv
 hw/RTL/peripherals/axi_uart/top_uart.sv
 hw/RTL/peripherals/axi_gpio/axi_lite_template/axi_lite_template.sv
+hw/RTL/peripherals/axi-7seg-cntr/axi_7seg_cntr.sv
 
 hw/RTL/bootloader/load_store_controller.sv
 hw/RTL/bootloader/uart_word_adapter.sv

@@ -11,6 +11,9 @@ module tb_ROC_RV32_program;
 	logic uart_tx;
 	logic led_status;
 	tri [31:0] pin_gpio;
+	logic [7:0] seg;
+	logic [6:0] ABDCEFG;
+	logic DP;
 
 	parameter int CLK_FREQ = 50_000_000;
 	parameter int BAUD_RATE = 115200;
@@ -33,7 +36,10 @@ module tb_ROC_RV32_program;
 		.tx(tx),
 		.uart_rx(uart_rx),
 		.uart_tx(uart_tx),
-		.pin_gpio(pin_gpio)
+		.pin_gpio(pin_gpio),
+		.seg(seg),
+		.ABDCEFG(ABDCEFG),
+		.DP(DP)
 	);
 
 	initial clk = 1'b0;

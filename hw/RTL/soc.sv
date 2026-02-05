@@ -2,6 +2,7 @@ module soc #(
     parameter CLK_FREQ = 100_000_000,
     parameter BAUD_RATE = 115200,
     parameter int N_EXT_IRQ = 8,
+    parameter int NDISP = 8,
     // 11 -> 2^11 words = 2048 words = 8KB
     parameter int ADDR_WIDTH = 11,
     parameter int DATA_WIDTH = 32,
@@ -20,7 +21,12 @@ module soc #(
     output logic uart_tx,                   // Transmit data line AXI UART
 
     // GPIO
-    inout  tri   [31:0] pin_gpio
+    inout  tri   [31:0] pin_gpio,
+
+    // 7-segment display outputs
+    output logic [NDISP-1:0]         seg,
+    output logic [6:0]               ABDCEFG,
+    output logic                     DP
 );
 
     logic rst_n;
@@ -312,11 +318,14 @@ module soc #(
         .interrupt(gpio_irq)
     );
 
-    // AXI4-Lite REGs peripheral
-    axi_lite_template #(
-        .C_ADDR_WIDTH(6),
-        .C_DATA_WIDTH(DATA_WIDTH)
-    ) regs_peripheral_i (
+    // AXI4-Lite 7-seg controller peripheral
+    axi_7seg_cntr #(
+        .NDISP(NDISP),
+        .MODE_DISP(1),
+        .MODE_SEG(0),
+        .ADDR_WIDTH(6),
+        .DATA_WIDTH(DATA_WIDTH)
+    ) seg7_peripheral_i (
         .clk(clk),
         .nrst(rst_n),
 
@@ -343,7 +352,12 @@ module soc #(
         .rdata(rdata_s[1]),
         .rresp(rresp_s[1]),
         .rvalid(rvalid_s[1]),
-        .rready(rready_s[1])
+        .rready(rready_s[1]),
+
+        // 7-segment outputs
+        .seg(seg),
+        .ABDCEFG(ABDCEFG),
+        .DP(DP)
     );
 
     // AXI4-Lite UART peripheral

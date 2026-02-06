@@ -5,6 +5,8 @@ module control_unit(
     input logic        clk,
     input logic        rst_n,
     // From decoder
+    input logic [4:0]  rs1,
+    input logic [4:0]  rd,
     input logic [6:0]  opcode,
     input logic [2:0]  funct3,
     input logic [6:0]  funct7,
@@ -41,7 +43,10 @@ module control_unit(
     // To datapath/memory
     output logic [31:0] load_ext,
     output logic [31:0] data_cpu_o,
-    output logic [3:0]  strb_cpu
+    output logic [3:0]  strb_cpu,
+
+    // Interrupt
+    input logic        irq
 );
 
     localparam logic [2:0]
@@ -51,6 +56,8 @@ module control_unit(
         S_MEM    = 3'd3,
         S_WB     = 3'd4;
 
+    logic wfi;
+
     // Fully sequential FSM (multi-cycle, no pipeline)
     // Note: opcode/funct* are stable because the top-level latches IR.
     always_ff @(posedge clk or negedge rst_n) begin
@@ -58,6 +65,7 @@ module control_unit(
             cpu_state <= S_FETCH;
             rready_cpu <= 0;
             wvalid_cpu <= 0;
+            wfi <= 0;
         end else begin
             // Default deassertions each cycle; asserted only in S_MEM.
             rready_cpu <= 1'b0;
@@ -65,19 +73,34 @@ module control_unit(
 
             unique case (cpu_state)
                 // Wait 1 cycle so synchronous imem presents the instruction for current PC.
-                S_FETCH:  cpu_state <= S_DECODE;
+                S_FETCH: begin
+                    if (irq) begin
+                        wfi <= 0;
+                        cpu_state <= S_DECODE;
+                    end
+
+                    if (!wfi) begin
+                        cpu_state <= S_DECODE;
+                    end
+                end
 
                 // In DECODE, the top-level latches IR <= imem_dout.
                 S_DECODE: cpu_state <= S_EXEC;
 
                 // Execute: compute ALU/compare and decide if memory/WB is needed.
                 S_EXEC: begin
-                    unique case (opcode)
-                        OPC_LOAD:   cpu_state <= S_MEM;   // LOAD
-                        OPC_STORE:  cpu_state <= S_MEM;   // STORE
-                        OPC_BRANCH: cpu_state <= S_FETCH; // BRANCH (no WB)
-                        default:    cpu_state <= S_WB;    // ALU/JAL/JALR/LUI/AUIPC
-                    endcase
+                    if(OPC_SYSTEM == opcode && funct3 == 3'b000 && imm_i == 12'b000100000101
+                       && rs1 == 5'b00000 && rd == 5'b00000) begin
+                        wfi <= 1'b1; // WFI instruction: enter WFI state until next interrupt
+                        cpu_state <= S_FETCH;
+                    end else begin
+                        unique case (opcode)
+                            OPC_LOAD:   cpu_state <= S_MEM;   // LOAD
+                            OPC_STORE:  cpu_state <= S_MEM;   // STORE
+                            OPC_BRANCH: cpu_state <= S_FETCH; // BRANCH (no WB)
+                            default:    cpu_state <= S_WB;    // ALU/JAL/JALR/LUI/AUIPC
+                        endcase
+                    end
                 end
 
                 // Memory access: for LOAD we need a WB cycle; for STORE we're done.

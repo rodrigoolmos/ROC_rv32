@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include "stdio.h"
 
 #define OK_FLAG  0xDEADBEEFu
 #define ERR_FLAG 0xBAD00000u
@@ -8,8 +7,6 @@
 #define RESULT    ((volatile uint32_t *)DMEM_BASE)
 
 #define MMIO_GPIO_BASE  0x00000000u
-#define MMIO_7SEG_BASE  0x00001000u
-#define MMIO_UART_BASE  0x00002000u
 #define MMIO_CLINT_BASE 0x00003000u
 
 #define GPIO_DATA_OFFSET       0x00u
@@ -17,28 +14,26 @@
 #define GPIO_IRQ_ENA_OFFSET    0x08u
 #define GPIO_IRQ_STATUS_OFFSET 0x0Cu
 
-#define SEG_DATA_OFFSET 0x00u
-#define SEG_DP_OFFSET   0x04u
-
-#define MSTATUS_MIE_MASK (1u << 3)
-#define MIE_MEIE_MASK    (1u << 11)
-#define MIE_MTIE_MASK    (1u << 7)
-#define MCAUSE_MEI       0x8000000Bu
-#define MCAUSE_MTI       0x80000007u
-
-#define CSR_EXT_IRQ 0xF00
-
-#define OUTPUT 1u
-#define INPUT  0u
-
 #define CLINT_MTIME_L     0x00u
 #define CLINT_MTIME_H     0x04u
 #define CLINT_MTIMECMP_L  0x08u
 #define CLINT_MTIMECMP_H  0x0Cu
 
-#define CPU_FREQ_HZ    100000000u
-#define TIMER_TICKS    (CPU_FREQ_HZ)         // 1 second tick
-#define DEBOUNCE_TICKS (CPU_FREQ_HZ / 10u)   // 100 ms debounce window
+#define MSTATUS_MIE_MASK (1u << 3)
+#define MIE_MEIE_MASK    (1u << 11)
+#define MIE_MTIE_MASK    (1u << 7)
+
+#define MCAUSE_MEI 0x8000000Bu
+#define MCAUSE_MTI 0x80000007u
+
+#define FAIL_EXT_WAKE        0x0001u
+#define FAIL_EXT_PENDING     0x0002u
+#define FAIL_TIMER_IRQ       0x0003u
+#define FAIL_PRIORITY_EXT    0x0004u
+#define FAIL_PRIORITY_TIMER  0x0005u
+#define FAIL_GPIO_TIMEOUT    0x0006u
+#define FAIL_TIMER_TIMEOUT   0x0007u
+#define FAIL_PRIORITY_TIMEOUT 0x0008u
 
 static inline uint32_t csr_read_mstatus(void)
 {
@@ -76,11 +71,14 @@ static inline uint32_t csr_read_mcause(void)
     return value;
 }
 
-static inline uint32_t csr_read_ext_irq(void)
+static inline void wfi(void)
 {
-    uint32_t value;
-    __asm__ volatile ("csrr %0, %1" : "=r"(value) : "i"(CSR_EXT_IRQ));
-    return value;
+    __asm__ volatile ("wfi");
+}
+
+static inline void nop(void)
+{
+    __asm__ volatile ("addi x0, x0, 0");
 }
 
 static inline uint32_t mmio_read(uint32_t addr)
@@ -91,6 +89,26 @@ static inline uint32_t mmio_read(uint32_t addr)
 static inline void mmio_write(uint32_t addr, uint32_t value)
 {
     *(volatile uint32_t *)addr = value;
+}
+
+static void gpio_set_direction(uint32_t direction)
+{
+    mmio_write(MMIO_GPIO_BASE + GPIO_DIR_OFFSET, direction);
+}
+
+static void gpio_enable_irq(uint32_t irq_mask)
+{
+    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_ENA_OFFSET, irq_mask);
+}
+
+static uint32_t gpio_irq_status(void)
+{
+    return mmio_read(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET);
+}
+
+static void gpio_clear_irq(uint32_t irq_mask)
+{
+    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET, irq_mask);
 }
 
 static uint64_t clint_read_mtime(void)
@@ -110,216 +128,207 @@ static uint64_t clint_read_mtime(void)
 
 static void clint_write_mtimecmp(uint64_t value)
 {
-    // Avoid spurious interrupts during update.
     mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, 0xFFFFFFFFu);
     mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_L, (uint32_t)value);
     mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, (uint32_t)(value >> 32));
 }
 
-static void enable_external_irq(void)
+static void clint_disable_timer(void)
 {
-    uint32_t mie = csr_read_mie();
-    mie |= MIE_MEIE_MASK;
-    csr_write_mie(mie);
-
-    uint32_t mstatus = csr_read_mstatus();
-    mstatus |= MSTATUS_MIE_MASK;
-    csr_write_mstatus(mstatus);
+    clint_write_mtimecmp(~(uint64_t)0);
 }
 
-static void enable_timer_irq(void)
+static void clint_arm_timer(uint32_t delta_cycles)
 {
-    uint32_t mie = csr_read_mie();
-    mie |= MIE_MTIE_MASK;
-    csr_write_mie(mie);
-
-    uint32_t mstatus = csr_read_mstatus();
-    mstatus |= MSTATUS_MIE_MASK;
-    csr_write_mstatus(mstatus);
+    uint64_t now = clint_read_mtime();
+    clint_write_mtimecmp(now + (uint64_t)delta_cycles);
 }
 
-static void set_handler(uint32_t handler_addr)
+static void enable_global_irq(void)
 {
-    csr_write_mtvec(handler_addr);
+    csr_write_mstatus(csr_read_mstatus() | MSTATUS_MIE_MASK);
 }
 
-static void gpio_set_direction(uint32_t direction)
+static void disable_global_irq(void)
 {
-    mmio_write(MMIO_GPIO_BASE + GPIO_DIR_OFFSET, direction);
+    csr_write_mstatus(csr_read_mstatus() & ~MSTATUS_MIE_MASK);
 }
 
-static uint32_t gpio_read_status(){
-    return mmio_read(MMIO_GPIO_BASE + GPIO_DATA_OFFSET);
-}
-
-static void gpio_enable_irq(uint32_t irq_mask)
+static void fail(uint32_t code)
 {
-    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_ENA_OFFSET, irq_mask);
-}
-
-static uint32_t gpio_irq_status(void)
-{
-    return mmio_read(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET);
-}
-
-static void gpio_clear_irq(uint32_t irq_mask)
-{
-    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET, irq_mask);
-}
-
-static void seg7_write(uint32_t value, uint32_t dp_mask)
-{
-    mmio_write(MMIO_7SEG_BASE + SEG_DATA_OFFSET, value);
-    mmio_write(MMIO_7SEG_BASE + SEG_DP_OFFSET, dp_mask);
-}
-
-static inline uint32_t irq_save_disable(void)
-{
-    uint32_t mstatus = csr_read_mstatus();
-    csr_write_mstatus(mstatus & ~MSTATUS_MIE_MASK);
-    return mstatus;
-}
-
-static inline void irq_restore(uint32_t mstatus)
-{
-    csr_write_mstatus(mstatus);
-}
-
-static volatile uint32_t g_irq_count_button;
-static volatile uint32_t g_irq_count_timer;
-static volatile uint32_t g_last_ext_irq;
-static volatile uint32_t g_last_gpio_irq;
-static volatile uint32_t g_button_pending;
-static volatile uint32_t g_timer_pending;
-static volatile uint32_t g_debounce_active;
-static volatile uint64_t g_debounce_deadline;
-static volatile uint64_t g_next_tick_deadline;
-
-static void schedule_next_timer_from_isr(void)
-{
-    uint64_t next = g_next_tick_deadline;
-    if (g_debounce_active && g_debounce_deadline < next) {
-        next = g_debounce_deadline;
+    RESULT[0] = ERR_FLAG | code;
+    for (;;) {
+        wfi();
     }
-    clint_write_mtimecmp(next);
 }
 
-/* ------------------------
- * Trap handler
- * ------------------------ */
+static volatile uint32_t g_ext_irq_count;
+static volatile uint32_t g_timer_irq_count;
+static volatile uint32_t g_last_gpio_irq;
+static volatile uint32_t g_last_mcause;
+static volatile uint32_t g_first_mcause;
+static volatile uint32_t g_capture_first;
+
 void __attribute__((interrupt("machine"))) trap_handler(void)
 {
     uint32_t mcause = csr_read_mcause();
+    g_last_mcause = mcause;
+
+    if (g_capture_first && g_first_mcause == 0u) {
+        g_first_mcause = mcause;
+    }
 
     if (mcause == MCAUSE_MEI) {
-        if (!g_debounce_active) {
-            g_last_ext_irq = csr_read_ext_irq();
-            g_last_gpio_irq = gpio_irq_status();
-            if (g_last_gpio_irq != 0u) {
-                gpio_clear_irq(g_last_gpio_irq);
-            }
-            gpio_enable_irq(0u);
-            g_debounce_deadline = clint_read_mtime() + (uint64_t)DEBOUNCE_TICKS;
-            g_debounce_active = 1u;
-            schedule_next_timer_from_isr();
-        } else {
-            g_last_gpio_irq = gpio_irq_status();
-            if (g_last_gpio_irq != 0u) {
-                gpio_clear_irq(g_last_gpio_irq);
-            }
+        g_ext_irq_count++;
+        g_last_gpio_irq = gpio_irq_status();
+        if (g_last_gpio_irq != 0u) {
+            gpio_clear_irq(g_last_gpio_irq);
         }
-
     } else if (mcause == MCAUSE_MTI) {
-        uint64_t now = clint_read_mtime();
-
-        if ((int64_t)(now - g_next_tick_deadline) >= 0) {
-            do {
-                g_next_tick_deadline += (uint64_t)TIMER_TICKS;
-                g_timer_pending++;
-            } while ((int64_t)(now - g_next_tick_deadline) >= 0);
-        }
-
-        if (g_debounce_active && (int64_t)(now - g_debounce_deadline) >= 0) {
-            g_debounce_active = 0u;
-            if (gpio_read_status() & 1u) {
-                g_button_pending++;
-            }
-            gpio_clear_irq(0xFFFFFFFFu);
-            gpio_enable_irq(1u << 0);
-        }
-
-        schedule_next_timer_from_isr();
+        g_timer_irq_count++;
+        clint_disable_timer();
     } else {
         RESULT[0] = ERR_FLAG | (mcause & 0xFFFFu);
     }
 }
 
-/* ------------------------
- * Main
- * ------------------------ */
+static void wait_gpio_pending(uint32_t timeout_loops)
+{
+    while (gpio_irq_status() == 0u) {
+        if (timeout_loops-- == 0u) {
+            fail(FAIL_GPIO_TIMEOUT);
+        }
+        nop();
+    }
+}
+
+static void wait_timer_irq(uint32_t timeout_loops)
+{
+    while (g_timer_irq_count == 0u) {
+        if (timeout_loops-- == 0u) {
+            fail(FAIL_TIMER_TIMEOUT);
+        }
+        nop();
+    }
+}
+
+static void wait_first_mcause(uint32_t timeout_loops)
+{
+    while (g_first_mcause == 0u) {
+        if (timeout_loops-- == 0u) {
+            fail(FAIL_PRIORITY_TIMEOUT);
+        }
+        nop();
+    }
+}
+
 int main(void)
 {
-    // Clear result word.
+    const uint32_t timer_delta = 2000u;
+    const uint32_t watchdog_ext = 300000u;
+    const uint32_t watchdog_pending = 200000u;
+    const uint32_t timeout_spin = 500000u;
+
     RESULT[0] = 0u;
+    g_ext_irq_count = 0u;
+    g_timer_irq_count = 0u;
+    g_last_gpio_irq = 0u;
+    g_last_mcause = 0u;
+    g_first_mcause = 0u;
+    g_capture_first = 0u;
 
-    // Set trap handler.
-    set_handler((uint32_t)trap_handler);
+    csr_write_mtvec((uint32_t)trap_handler);
 
-    // Configure GPIO0 as input and enable its interrupt.
     gpio_set_direction(0x0u);
     gpio_clear_irq(0xFFFFFFFFu);
+    gpio_enable_irq(0u);
+
+    csr_write_mie(0u);
+    disable_global_irq();
+    clint_disable_timer();
+
+    /* Phase 1: WFI wakes on external IRQ (watchdog timer prevents hang). */
+    g_ext_irq_count = 0u;
+    g_timer_irq_count = 0u;
+    gpio_clear_irq(0xFFFFFFFFu);
     gpio_enable_irq(1u << 0);
-    seg7_write(0u, 0u);
 
-    // Program and enable timer interrupts.
-    g_next_tick_deadline = clint_read_mtime() + (uint64_t)TIMER_TICKS;
-    g_debounce_active = 0u;
-    clint_write_mtimecmp(g_next_tick_deadline);
-    enable_timer_irq();
+    csr_write_mie(MIE_MEIE_MASK | MIE_MTIE_MASK);
+    enable_global_irq();
 
-    // Enable CPU external interrupts.
-    enable_external_irq();
+    clint_arm_timer(watchdog_ext);
+    while (g_ext_irq_count == 0u && g_timer_irq_count == 0u) {
+        wfi();
+    }
+    if (g_ext_irq_count == 0u) {
+        fail(FAIL_EXT_WAKE);
+    }
+    clint_disable_timer();
+    g_timer_irq_count = 0u;
 
-    // Wait until 1000 button interrupts arrive.
-    while (g_irq_count_button < 1000u) {
-        uint32_t pending_button;
-        uint32_t pending_timer;
-        uint32_t mstatus = irq_save_disable();
-        pending_button = g_button_pending;
-        g_button_pending = 0u;
-        pending_timer = g_timer_pending;
-        g_timer_pending = 0u;
-        irq_restore(mstatus);
+    /* Phase 2: external IRQ pending before WFI (should wake immediately). */
+    disable_global_irq();
+    gpio_clear_irq(0xFFFFFFFFu);
+    gpio_enable_irq(1u << 0);
+    wait_gpio_pending(timeout_spin);
+    g_ext_irq_count = 0u;
 
-        while (pending_button--) {
-            g_irq_count_button++;
-            printf_int((volatile uint32_t *)MMIO_UART_BASE, "BTN %d\n", (int)g_irq_count_button);
-        }
-        while (pending_timer--) {
-            g_irq_count_timer++;
-            printf_int((volatile uint32_t *)MMIO_UART_BASE, "TMR %d\n", (int)g_irq_count_timer);
-        }
+    enable_global_irq();
+    clint_arm_timer(watchdog_pending);
+    wfi();
+    nop();
+    if (g_ext_irq_count == 0u) {
+        fail(FAIL_EXT_PENDING);
+    }
+    clint_disable_timer();
+    g_timer_irq_count = 0u;
 
-        if ((pending_button | pending_timer) != 0u) {
-            seg7_write((g_irq_count_timer << 16) | (g_irq_count_button & 0xFFFFu), 0u);
-        }
-
-        if (g_button_pending == 0u && g_timer_pending == 0u) {
-            __asm__ volatile ("wfi");
-        }
+    /* Phase 3: timer IRQ works (no WFI, to avoid raw-IRQ wake issues). */
+    gpio_enable_irq(0u);
+    g_timer_irq_count = 0u;
+    csr_write_mie(MIE_MTIE_MASK);
+    enable_global_irq();
+    clint_arm_timer(timer_delta);
+    wait_timer_irq(timeout_spin);
+    if (g_timer_irq_count == 0u) {
+        fail(FAIL_TIMER_IRQ);
     }
 
-    // Stop external interrupts once the target count is reached.
-    gpio_enable_irq(0u);
-    csr_write_mie(csr_read_mie() & ~(MIE_MEIE_MASK | MIE_MTIE_MASK));
-    clint_write_mtimecmp(~(uint64_t)0);
+    /* Phase 4: priority when both pending (external must win). */
+    disable_global_irq();
+    g_ext_irq_count = 0u;
+    g_timer_irq_count = 0u;
+    g_first_mcause = 0u;
+    g_capture_first = 1u;
+    gpio_clear_irq(0xFFFFFFFFu);
+    gpio_enable_irq(1u << 0);
+    csr_write_mie(MIE_MEIE_MASK | MIE_MTIE_MASK);
+    clint_arm_timer(0u);
+    wait_gpio_pending(timeout_spin);
 
-    // Record a simple success signature and latch the last IRQ sources.
+    enable_global_irq();
+    wait_first_mcause(timeout_spin);
+    g_capture_first = 0u;
+
+    if (g_first_mcause != MCAUSE_MEI) {
+        fail(FAIL_PRIORITY_EXT);
+    }
+
+    gpio_enable_irq(0u);
+    wait_timer_irq(timeout_spin);
+    if (g_last_mcause != MCAUSE_MTI) {
+        fail(FAIL_PRIORITY_TIMER);
+    }
+
+    clint_disable_timer();
+
     RESULT[0] = OK_FLAG;
-    RESULT[1] = g_last_ext_irq;
-    RESULT[2] = g_last_gpio_irq;
+    RESULT[1] = g_ext_irq_count;
+    RESULT[2] = g_timer_irq_count;
+    RESULT[3] = g_last_gpio_irq;
+    RESULT[4] = g_last_mcause;
 
     for (;;) {
-        __asm__ volatile ("wfi");
+        wfi();
     }
 }

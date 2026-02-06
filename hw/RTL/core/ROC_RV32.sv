@@ -82,6 +82,9 @@ module ROC_RV32 #(
     logic        take_return;
     logic [31:0] return_pc;
 
+    logic irq;
+
+
     // Word-addressed memories (PC/result are byte addresses)
     assign imem_addr = pc_output[ADDR_WIDTH_I+1:2];
     assign addr_cpu = alu_out;
@@ -91,6 +94,8 @@ module ROC_RV32 #(
     assign op2 = alu_src2 ? imm_ext : do2;
     // MUX for ALU operand 1 PC (for AUIPC) or register
     assign op1 = alu_src1 ? pc_ir : do1;
+    // IRQ
+    assign irq = |{timer_irq, external_irq};
     alu alu_ins(
         .op1(op1),
         .op2(op2),
@@ -103,6 +108,8 @@ module ROC_RV32 #(
         .clk(clk),
         .rst_n(rst_n),
         // From decoder
+        .rs1(rs1),
+        .rd(rd),
         .opcode(opcode),
         .funct3(funct3),
         .funct7(funct7),
@@ -133,7 +140,10 @@ module ROC_RV32 #(
 
         .load_ext(load_ext),            // Data sign extended
         .data_cpu_i(data_cpu_i),        // Data to store after formatting
-        .strb_cpu(strb_cpu)             // Byte write strobe for store
+        .strb_cpu(strb_cpu),            // Byte write strobe for store
+
+        // Interrupt
+        .irq(irq)
     );
 
     // Decode minimal SYSTEM support needed by the machine-trap CSR block.

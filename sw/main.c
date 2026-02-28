@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "stdio.h"
 
 #define OK_FLAG  0xDEADBEEFu
 #define ERR_FLAG 0xBAD00000u
@@ -21,6 +22,9 @@
 #define ADDR_CFG            24
 
 #define CLINT_MTIME_L       0x00u
+#define CLINT_MTIME_H       0x04u
+#define CLINT_MTIMECMP_L    0x08u
+#define CLINT_MTIMECMP_H    0x0Cu
 
 #define CPU_FREQ_HZ         100000000u
 
@@ -65,17 +69,45 @@ static inline void wait_for_spi_ready(void){
     } while (status & (1u << 4)); // busy
 }
 
-static uint32_t clint_read_mtime_lo(void){
-    uint32_t ticks;
-    mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_L, &ticks);
-    return ticks;
+static void clint_read_mtime(uint32_t *hi, uint32_t *lo){
+    uint32_t hi_1, hi_2, lo_v;
+
+    do {
+        mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_H, &hi_1);
+        mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_L, &lo_v);
+        mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_H, &hi_2);
+    } while (hi_1 != hi_2);
+
+    *hi = hi_2;
+    *lo = lo_v;
+}
+
+static void clint_write_mtimecmp(uint32_t hi, uint32_t lo){
+    // Write high first to max to avoid a transient early compare while updating low/high.
+    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, 0xFFFFFFFFu);
+    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_L, lo);
+    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, hi);
 }
 
 static void delay_1s(void){
-    uint32_t start = clint_read_mtime_lo();
-    while ((uint32_t)(clint_read_mtime_lo() - start) < CPU_FREQ_HZ) {
-        __asm__ volatile ("nop");
-    }
+    uint32_t start_hi, start_lo;
+    uint32_t deadline_hi, deadline_lo;
+    uint32_t now_hi, now_lo;
+
+    clint_read_mtime(&start_hi, &start_lo);
+
+    deadline_lo = start_lo + CPU_FREQ_HZ;
+    deadline_hi = start_hi + ((deadline_lo < start_lo) ? 1u : 0u);
+
+    clint_write_mtimecmp(deadline_hi, deadline_lo);
+
+    do {
+        __asm__ volatile ("wfi");
+        clint_read_mtime(&now_hi, &now_lo);
+    } while ((now_hi < deadline_hi) ||
+             ((now_hi == deadline_hi) && (now_lo < deadline_lo)));
+
+    clint_write_mtimecmp(0xFFFFFFFFu, 0xFFFFFFFFu);
 }
 
 static void configure_spi(const struct spi_cfg_t *cfg){

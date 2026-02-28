@@ -349,7 +349,7 @@ int main(void)
         // DPs on digit 6 and digit 2 place the decimal point in each 4-digit group.
         uint32_t T_disp = seg7_pack_x100((T_x100 < 0) ? (uint32_t)(-T_x100) : (uint32_t)T_x100);
         uint32_t H_disp = seg7_pack_x100(H_x100);
-        seg7_write((T_disp << 16) | H_disp, (1u << 6) | (1u << 2));
+        seg7_write((T_disp << 16) | H_disp, 0b110111011);
 
         // Guardar también en RESULT por si quieres mirar DMEM
         RESULT[2] = (uint32_t)T_x100;

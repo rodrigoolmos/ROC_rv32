@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include "stdio.h"
 
 #define OK_FLAG  0xDEADBEEFu
 #define ERR_FLAG 0xBAD00000u

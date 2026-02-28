@@ -1,5 +1,5 @@
-## Nexys A7 constraints template (fill in pins as needed)
-## Clock: 50 MHz
+## Nexys A7-100T constraints template (fill in pins as needed)
+## Clock: 100 MHz
 
 # Clock input
 set_property PACKAGE_PIN E3 [get_ports clk]

@@ -330,8 +330,10 @@ module soc #(
     // AXI4-Lite 7-seg controller peripheral
     axi_7seg_cntr #(
         .NDISP(NDISP),
-        .MODE_DISP(1),
-        .MODE_SEG(0),
+        .MODE_DISP(1), // Nexys A7: digit enables are active-low
+        .MODE_SEG(0),  // Nexys A7: segments and decimal point are active-low
+        .CLK_FREQ_HZ(CLK_FREQ),
+        .DIGIT_REFRESH_HZ(1000),
         .ADDR_WIDTH(6),
         .DATA_WIDTH(DATA_WIDTH)
     ) seg7_peripheral_i (

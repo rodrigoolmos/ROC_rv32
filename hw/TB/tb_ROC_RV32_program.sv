@@ -15,6 +15,11 @@ module tb_ROC_RV32_program;
 	logic [6:0] ABDCEFG;
 	logic DP;
 
+	logic spi_clk;
+	logic spi_mosi;
+	logic spi_miso;
+	logic spi_cs_n;
+
 	parameter int CLK_FREQ = 50_000_000;
 	parameter int BAUD_RATE = 115200;
 	parameter int ADDR_WIDTH = 11;
@@ -39,7 +44,11 @@ module tb_ROC_RV32_program;
 		.pin_gpio(pin_gpio),
 		.seg(seg),
 		.ABDCEFG(ABDCEFG),
-		.DP(DP)
+		.DP(DP),
+		.spi_clk(spi_clk),
+		.spi_mosi(spi_mosi),
+		.spi_miso(spi_miso),
+		.spi_cs_n(spi_cs_n)
 	);
 
 	initial clk = 1'b0;
@@ -237,6 +246,7 @@ module tb_ROC_RV32_program;
 	initial begin
 		reset_dut();
 		rx = 1'b1;
+		spi_miso = 1'b0;
 		uart_rx = 1'b1;
 
 		// Stop condition configuration:

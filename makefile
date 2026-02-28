@@ -10,6 +10,8 @@ CC      := $(RISCV_PREFIX)gcc
 OBJDUMP := $(RISCV_PREFIX)objdump
 OBJCOPY := $(RISCV_PREFIX)objcopy
 HOST_CC ?= gcc
+OPT     ?= -Os
+DBG     ?= -g3
 
 BUILD_DIR := build
 
@@ -29,12 +31,13 @@ SW_APP ?= main.c
 SW_APP_PATH := $(SW_DIR)/$(SW_APP)
 
 # CSR instructions (csrr/csrw/csrsi/...) require Zicsr.
-CFLAGS  := -march=rv32izicsr -mabi=ilp32 -O0 -g3 \
+CFLAGS  := -march=rv32izicsr -mabi=ilp32 $(OPT) $(DBG) \
 	-ffreestanding -fno-builtin \
 	-fno-builtin-memcpy -fno-builtin-memset -fno-builtin-memmove -fno-builtin-memcmp \
 	-fno-tree-loop-distribute-patterns \
 	-fno-jump-tables -fno-tree-switch-conversion -Wall -Wextra
 LDFLAGS := -nostdlib -Wl,-T,$(SW_DIR)/link.ld -Wl,--gc-sections
+LDLIBS  := -lgcc
 
 .PHONY: all clean toolchain-check sim sim-gui sim-batch riscv-test riscv-test-sim vivado-syn bootloader
 
@@ -49,7 +52,7 @@ $(BUILD_DIR):
 SW_COMMON_SRCS := $(SW_DIR)/stdio.c
 
 $(ELF): toolchain-check $(BUILD_DIR) $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_COMMON_SRCS) $(SW_DIR)/link.ld
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_COMMON_SRCS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SW_DIR)/crt0.S $(SW_APP_PATH) $(SW_COMMON_SRCS) $(LDLIBS)
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@

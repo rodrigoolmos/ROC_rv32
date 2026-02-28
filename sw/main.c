@@ -7,251 +7,274 @@
 #define DMEM_BASE 0x10000000u
 #define RESULT    ((volatile uint32_t *)DMEM_BASE)
 
-#define MMIO_GPIO_BASE  0x00000000u
-#define MMIO_7SEG_BASE  0x00001000u
-#define MMIO_UART_BASE  0x00002000u
-#define MMIO_CLINT_BASE 0x00003000u
+#define MMIO_7SEG_BASE      0x00001000u
+#define MMIO_uart_BASE      0x00002000u
+#define MMIO_CLINT_BASE     0x00003000u
+#define MMIO_SPI_BASE       0x00004000u
+#define SEG_DATA_OFFSET     0x00u
+#define SEG_DP_OFFSET       0x04u
+#define ADDR_STATUS         0
+#define ADDR_WRITE          4
+#define ADDR_READ           8
+#define ADDR_N_BYTE_W_R     12
+#define ADDR_DELAYS         16
+#define ADDR_CLK_DIV        20
+#define ADDR_CFG            24
 
-#define GPIO_DATA_OFFSET       0x00u
-#define GPIO_DIR_OFFSET        0x04u
-#define GPIO_IRQ_ENA_OFFSET    0x08u
-#define GPIO_IRQ_STATUS_OFFSET 0x0Cu
+#define CLINT_MTIME_L       0x00u
 
-#define SEG_DATA_OFFSET 0x00u
-#define SEG_DP_OFFSET   0x04u
+#define CPU_FREQ_HZ         100000000u
 
-#define MSTATUS_MIE_MASK (1u << 3)
-#define MIE_MEIE_MASK    (1u << 11)
-#define MIE_MTIE_MASK    (1u << 7)
-#define MCAUSE_MEI       0x8000000Bu
-#define MCAUSE_MTI       0x80000007u
+struct spi_cfg_t{
+    int msb_first;
+    int delay_byte;
+    int n_delay_byte;
+    int cpol;
+    int cpha;
+    int clk_div;
+};
+static struct spi_cfg_t spi_cfg;
 
-#define CSR_EXT_IRQ 0xF00
-
-#define OUTPUT 1u
-#define INPUT  0u
-
-#define CLINT_MTIME_L     0x00u
-#define CLINT_MTIME_H     0x04u
-#define CLINT_MTIMECMP_L  0x08u
-#define CLINT_MTIMECMP_H  0x0Cu
-
-#define CPU_FREQ_HZ    100000000u
-#define TIMER_TICKS    (CPU_FREQ_HZ)         // 1 second tick
-#define DEBOUNCE_TICKS (CPU_FREQ_HZ / 10u)   // 100 ms debounce window
-
-static inline uint32_t csr_read_mstatus(void)
-{
-    uint32_t value;
-    __asm__ volatile ("csrr %0, mstatus" : "=r"(value));
-    return value;
+static inline void mmio_write(uint32_t addr, uint32_t data){
+    *((volatile uint32_t *)(addr)) = data;
 }
 
-static inline void csr_write_mstatus(uint32_t value)
-{
-    __asm__ volatile ("csrw mstatus, %0" : : "r"(value));
+static inline void mmio_read(uint32_t addr, uint32_t *data){
+    *data = *((volatile uint32_t *)(addr));
 }
 
-static inline uint32_t csr_read_mie(void)
-{
-    uint32_t value;
-    __asm__ volatile ("csrr %0, mie" : "=r"(value));
-    return value;
-}
-
-static inline void csr_write_mie(uint32_t value)
-{
-    __asm__ volatile ("csrw mie, %0" : : "r"(value));
-}
-
-static inline void csr_write_mtvec(uint32_t value)
-{
-    __asm__ volatile ("csrw mtvec, %0" : : "r"(value));
-}
-
-static inline uint32_t csr_read_mcause(void)
-{
-    uint32_t value;
-    __asm__ volatile ("csrr %0, mcause" : "=r"(value));
-    return value;
-}
-
-static inline uint32_t csr_read_ext_irq(void)
-{
-    uint32_t value;
-    __asm__ volatile ("csrr %0, %1" : "=r"(value) : "i"(CSR_EXT_IRQ));
-    return value;
-}
-
-static inline uint32_t mmio_read(uint32_t addr)
-{
-    return *(volatile uint32_t *)addr;
-}
-
-static inline void mmio_write(uint32_t addr, uint32_t value)
-{
-    *(volatile uint32_t *)addr = value;
-}
-
-static uint64_t clint_read_mtime(void)
-{
-    uint32_t hi1;
-    uint32_t lo;
-    uint32_t hi2;
-
-    do {
-        hi1 = mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_H);
-        lo  = mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_L);
-        hi2 = mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_H);
-    } while (hi1 != hi2);
-
-    return ((uint64_t)hi2 << 32) | lo;
-}
-
-static void clint_write_mtimecmp(uint64_t value)
-{
-    // Avoid spurious interrupts during update.
-    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, 0xFFFFFFFFu);
-    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_L, (uint32_t)value);
-    mmio_write(MMIO_CLINT_BASE + CLINT_MTIMECMP_H, (uint32_t)(value >> 32));
-}
-
-static void enable_external_irq(void)
-{
-    uint32_t mie = csr_read_mie();
-    mie |= MIE_MEIE_MASK;
-    csr_write_mie(mie);
-
-    uint32_t mstatus = csr_read_mstatus();
-    mstatus |= MSTATUS_MIE_MASK;
-    csr_write_mstatus(mstatus);
-}
-
-static void enable_timer_irq(void)
-{
-    uint32_t mie = csr_read_mie();
-    mie |= MIE_MTIE_MASK;
-    csr_write_mie(mie);
-
-    uint32_t mstatus = csr_read_mstatus();
-    mstatus |= MSTATUS_MIE_MASK;
-    csr_write_mstatus(mstatus);
-}
-
-static void set_handler(uint32_t handler_addr)
-{
-    csr_write_mtvec(handler_addr);
-}
-
-static void gpio_set_direction(uint32_t direction)
-{
-    mmio_write(MMIO_GPIO_BASE + GPIO_DIR_OFFSET, direction);
-}
-
-static uint32_t gpio_read_status(){
-    return mmio_read(MMIO_GPIO_BASE + GPIO_DATA_OFFSET);
-}
-
-static void gpio_enable_irq(uint32_t irq_mask)
-{
-    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_ENA_OFFSET, irq_mask);
-}
-
-static uint32_t gpio_irq_status(void)
-{
-    return mmio_read(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET);
-}
-
-static void gpio_clear_irq(uint32_t irq_mask)
-{
-    mmio_write(MMIO_GPIO_BASE + GPIO_IRQ_STATUS_OFFSET, irq_mask);
-}
-
-static void seg7_write(uint32_t value, uint32_t dp_mask)
-{
-    mmio_write(MMIO_7SEG_BASE + SEG_DATA_OFFSET, value);
+static void seg7_write(uint32_t digits, uint32_t dp_mask){
+    mmio_write(MMIO_7SEG_BASE + SEG_DATA_OFFSET, digits);
     mmio_write(MMIO_7SEG_BASE + SEG_DP_OFFSET, dp_mask);
 }
 
-static inline uint32_t irq_save_disable(void)
-{
-    uint32_t mstatus = csr_read_mstatus();
-    csr_write_mstatus(mstatus & ~MSTATUS_MIE_MASK);
-    return mstatus;
-}
-
-static inline void irq_restore(uint32_t mstatus)
-{
-    csr_write_mstatus(mstatus);
-}
-
-static volatile uint32_t g_irq_count_button;
-static volatile uint32_t g_irq_count_timer;
-static volatile uint32_t g_last_ext_irq;
-static volatile uint32_t g_last_gpio_irq;
-static volatile uint32_t g_button_pending;
-static volatile uint32_t g_timer_pending;
-static volatile uint32_t g_debounce_active;
-static volatile uint64_t g_debounce_deadline;
-static volatile uint64_t g_next_tick_deadline;
-
-static void schedule_next_timer_from_isr(void)
-{
-    uint64_t next = g_next_tick_deadline;
-    if (g_debounce_active && g_debounce_deadline < next) {
-        next = g_debounce_deadline;
+static uint32_t seg7_pack_x100(uint32_t value_x100){
+    if (value_x100 > 9999u) {
+        value_x100 = 9999u;
     }
-    clint_write_mtimecmp(next);
+
+    return (((value_x100 / 1000u) % 10u) << 12) |
+           (((value_x100 /  100u) % 10u) << 8)  |
+           (((value_x100 /   10u) % 10u) << 4)  |
+           (((value_x100 /    1u) % 10u) << 0);
+}
+
+static inline void wait_for_spi_ready(void){
+    uint32_t status;
+    do {
+        mmio_read(MMIO_SPI_BASE + ADDR_STATUS, &status);
+    } while (status & (1u << 4)); // busy
+}
+
+static uint32_t clint_read_mtime_lo(void){
+    uint32_t ticks;
+    mmio_read(MMIO_CLINT_BASE + CLINT_MTIME_L, &ticks);
+    return ticks;
+}
+
+static void delay_1s(void){
+    uint32_t start = clint_read_mtime_lo();
+    while ((uint32_t)(clint_read_mtime_lo() - start) < CPU_FREQ_HZ) {
+        __asm__ volatile ("nop");
+    }
+}
+
+static void configure_spi(const struct spi_cfg_t *cfg){
+    wait_for_spi_ready();
+
+    uint32_t cfgw = ((uint32_t)(cfg->msb_first & 1) << 0) |
+                    ((uint32_t)(cfg->cpol      & 1) << 1) |
+                    ((uint32_t)(cfg->cpha      & 1) << 2);
+
+    uint32_t delays = ((uint32_t)(cfg->delay_byte   & 0xFFu) << 0) |
+                      ((uint32_t)(cfg->n_delay_byte & 0xFFu) << 8);
+
+    mmio_write(MMIO_SPI_BASE + ADDR_CFG, cfgw);
+    mmio_write(MMIO_SPI_BASE + ADDR_DELAYS, delays);
+    mmio_write(MMIO_SPI_BASE + ADDR_CLK_DIV, (uint32_t)cfg->clk_div);
+}
+
+/*
+ * SPI transaction:
+ *  - write tx_len bytes
+ *  - then read rx_len bytes
+ *
+ * Orden robusto: cargar TX -> disparar -> esperar fin -> leer RX
+ */
+static void spi_xfer(const uint8_t *tx, uint32_t tx_len, uint8_t *rx, uint32_t rx_len){
+    wait_for_spi_ready();
+
+    for (uint32_t i = 0; i < tx_len; i++) {
+        mmio_write(MMIO_SPI_BASE + ADDR_WRITE, tx[i]);
+    }
+
+    mmio_write(MMIO_SPI_BASE + ADDR_N_BYTE_W_R,
+               ((rx_len & 0xFFFFu) << 0) | ((tx_len & 0xFFFFu) << 16));
+
+    wait_for_spi_ready();
+
+    for (uint32_t i = 0; i < rx_len; i++) {
+        uint32_t d;
+        mmio_read(MMIO_SPI_BASE + ADDR_READ, &d);
+        rx[i] = (uint8_t)(d & 0xFFu);
+    }
 }
 
 /* ------------------------
- * Trap handler
+ * BME280 (SPI)
  * ------------------------ */
-void __attribute__((interrupt("machine"))) trap_handler(void)
-{
-    uint32_t mcause = csr_read_mcause();
+#define BME280_REG_ID        0xD0
+#define BME280_REG_RESET     0xE0
+#define BME280_REG_CTRL_HUM  0xF2
+#define BME280_REG_STATUS    0xF3
+#define BME280_REG_CTRL_MEAS 0xF4
+#define BME280_REG_CONFIG    0xF5
+#define BME280_REG_DATA      0xF7  // F7..FE (8 bytes)
 
-    if (mcause == MCAUSE_MEI) {
-        if (!g_debounce_active) {
-            g_last_ext_irq = csr_read_ext_irq();
-            g_last_gpio_irq = gpio_irq_status();
-            if (g_last_gpio_irq != 0u) {
-                gpio_clear_irq(g_last_gpio_irq);
-            }
-            gpio_enable_irq(0u);
-            g_debounce_deadline = clint_read_mtime() + (uint64_t)DEBOUNCE_TICKS;
-            g_debounce_active = 1u;
-            schedule_next_timer_from_isr();
-        } else {
-            g_last_gpio_irq = gpio_irq_status();
-            if (g_last_gpio_irq != 0u) {
-                gpio_clear_irq(g_last_gpio_irq);
-            }
-        }
+static void bme280_write(uint8_t reg, const uint8_t *data, uint32_t len){
+    uint8_t buf[1 + 32];
+    if (len > 32) len = 32;
 
-    } else if (mcause == MCAUSE_MTI) {
-        uint64_t now = clint_read_mtime();
+    buf[0] = (uint8_t)(reg & 0x7Fu); // write => bit7=0
+    for (uint32_t i = 0; i < len; i++) buf[1 + i] = data[i];
 
-        if ((int64_t)(now - g_next_tick_deadline) >= 0) {
-            do {
-                g_next_tick_deadline += (uint64_t)TIMER_TICKS;
-                g_timer_pending++;
-            } while ((int64_t)(now - g_next_tick_deadline) >= 0);
-        }
+    spi_xfer(buf, 1u + len, 0, 0);
+}
 
-        if (g_debounce_active && (int64_t)(now - g_debounce_deadline) >= 0) {
-            g_debounce_active = 0u;
-            if (gpio_read_status() & 1u) {
-                g_button_pending++;
-            }
-            gpio_clear_irq(0xFFFFFFFFu);
-            gpio_enable_irq(1u << 0);
-        }
+static void bme280_read(uint8_t reg, uint8_t *data, uint32_t len){
+    uint8_t cmd = (uint8_t)(reg | 0x80u); // read => bit7=1
+    spi_xfer(&cmd, 1, data, len);
+}
 
-        schedule_next_timer_from_isr();
-    } else {
-        RESULT[0] = ERR_FLAG | (mcause & 0xFFFFu);
+static uint8_t bme280_read_u8(uint8_t reg){
+    uint8_t v = 0;
+    bme280_read(reg, &v, 1);
+    return v;
+}
+
+static void bme280_reset_and_wait(void){
+    uint8_t rst = 0xB6;
+    bme280_write(BME280_REG_RESET, &rst, 1);
+
+    for (volatile uint32_t t = 0; t < 4000000u; t++) {
+        uint8_t st = bme280_read_u8(BME280_REG_STATUS);
+        if (((st & 0x01u) == 0) && ((st & 0x08u) == 0)) break;
     }
+}
+
+static void bme280_init_basic(void){
+    bme280_reset_and_wait();
+
+    // osrs_h = x1
+    uint8_t ctrl_hum = 0x01;
+    bme280_write(BME280_REG_CTRL_HUM, &ctrl_hum, 1);
+
+    // t_sb=1000ms (101), filter=off (000), spi3w=0
+    uint8_t config = (uint8_t)((0x05u << 5) | (0x00u << 2) | 0x00u);
+    bme280_write(BME280_REG_CONFIG, &config, 1);
+
+    // osrs_t=x1, osrs_p=x1, mode=normal
+    uint8_t ctrl_meas = (uint8_t)((0x01u << 5) | (0x01u << 2) | 0x03u);
+    bme280_write(BME280_REG_CTRL_MEAS, &ctrl_meas, 1);
+}
+
+/* -------- Calibración + compensación (Bosch, entero) -------- */
+struct bme280_calib {
+    uint16_t dig_T1; int16_t dig_T2; int16_t dig_T3;
+    uint16_t dig_P1; int16_t dig_P2; int16_t dig_P3; int16_t dig_P4; int16_t dig_P5;
+    int16_t  dig_P6; int16_t dig_P7; int16_t dig_P8; int16_t dig_P9;
+    uint8_t  dig_H1; int16_t dig_H2; uint8_t dig_H3; int16_t dig_H4; int16_t dig_H5; int8_t dig_H6;
+};
+
+static struct bme280_calib calib;
+static int32_t t_fine;
+
+static void bme280_read_calibration(void){
+    uint8_t b1[26];
+    uint8_t b2[7];
+
+    bme280_read(0x88, b1, 26);
+
+    calib.dig_T1 = (uint16_t)(b1[1] << 8 | b1[0]);
+    calib.dig_T2 = (int16_t)(b1[3] << 8 | b1[2]);
+    calib.dig_T3 = (int16_t)(b1[5] << 8 | b1[4]);
+
+    calib.dig_P1 = (uint16_t)(b1[7] << 8 | b1[6]);
+    calib.dig_P2 = (int16_t)(b1[9] << 8 | b1[8]);
+    calib.dig_P3 = (int16_t)(b1[11] << 8 | b1[10]);
+    calib.dig_P4 = (int16_t)(b1[13] << 8 | b1[12]);
+    calib.dig_P5 = (int16_t)(b1[15] << 8 | b1[14]);
+    calib.dig_P6 = (int16_t)(b1[17] << 8 | b1[16]);
+    calib.dig_P7 = (int16_t)(b1[19] << 8 | b1[18]);
+    calib.dig_P8 = (int16_t)(b1[21] << 8 | b1[20]);
+    calib.dig_P9 = (int16_t)(b1[23] << 8 | b1[22]);
+
+    calib.dig_H1 = b1[25];
+
+    bme280_read(0xE1, b2, 7);
+
+    calib.dig_H2 = (int16_t)(b2[1] << 8 | b2[0]);
+    calib.dig_H3 = b2[2];
+    calib.dig_H4 = (int16_t)((b2[3] << 4) | (b2[4] & 0x0F));
+    calib.dig_H5 = (int16_t)((b2[5] << 4) | (b2[4] >> 4));
+    calib.dig_H6 = (int8_t)b2[6];
+}
+
+static int32_t bme280_comp_T_x100(int32_t adc_T){
+    int32_t var1, var2;
+    var1 = ((((adc_T >> 3) - ((int32_t)calib.dig_T1 << 1))) * ((int32_t)calib.dig_T2)) >> 11;
+    var2 = (((((adc_T >> 4) - ((int32_t)calib.dig_T1)) * ((adc_T >> 4) - ((int32_t)calib.dig_T1))) >> 12) * ((int32_t)calib.dig_T3)) >> 14;
+    t_fine = var1 + var2;
+    return (t_fine * 5 + 128) >> 8; // °C * 100
+}
+
+static uint32_t bme280_comp_P_Pa(int32_t adc_P){
+    int32_t var1, var2;
+    uint32_t p;
+
+    // Use Bosch's 32-bit integer path to avoid pulling in 64-bit libgcc helpers on RV32I.
+    var1 = (t_fine >> 1) - 64000;
+    var2 = (((var1 >> 2) * (var1 >> 2)) >> 11) * (int32_t)calib.dig_P6;
+    var2 = var2 + ((var1 * (int32_t)calib.dig_P5) << 1);
+    var2 = (var2 >> 2) + ((int32_t)calib.dig_P4 << 16);
+
+    var1 = (((((var1 >> 2) * (var1 >> 2)) >> 13) * (int32_t)calib.dig_P3) >> 3) +
+           (((int32_t)calib.dig_P2 * var1) >> 1);
+    var1 = (var1 >> 18);
+    var1 = (((32768 + var1) * (int32_t)calib.dig_P1) >> 15);
+
+    if (var1 == 0) {
+        return 0;
+    }
+
+    p = ((uint32_t)(1048576 - adc_P) - ((uint32_t)var2 >> 12)) * 3125u;
+    if (p < 0x80000000u) {
+        p = (p << 1) / (uint32_t)var1;
+    } else {
+        p = (p / (uint32_t)var1) << 1;
+    }
+
+    var1 = (((int32_t)calib.dig_P9) * (int32_t)(((p >> 3) * (p >> 3)) >> 13)) >> 12;
+    var2 = (((int32_t)(p >> 2)) * (int32_t)calib.dig_P8) >> 13;
+
+    p = p + (uint32_t)((var1 + var2 + (int32_t)calib.dig_P7) >> 4);
+    return p; // Pa
+}
+
+static uint32_t bme280_comp_H_x1024(int32_t adc_H){
+    int32_t v_x1;
+
+    v_x1 = t_fine - 76800;
+    v_x1 = (((((adc_H << 14) - ((int32_t)calib.dig_H4 << 20) - ((int32_t)calib.dig_H5 * v_x1)) + 16384) >> 15) *
+            (((((((v_x1 * (int32_t)calib.dig_H6) >> 10) * (((v_x1 * (int32_t)calib.dig_H3) >> 11) + 32768)) >> 10) + 2097152) *
+               (int32_t)calib.dig_H2 + 8192) >> 14));
+
+    v_x1 = v_x1 - (((((v_x1 >> 15) * (v_x1 >> 15)) >> 7) * (int32_t)calib.dig_H1) >> 4);
+
+    if (v_x1 < 0) v_x1 = 0;
+    if (v_x1 > 419430400) v_x1 = 419430400;
+
+    return (uint32_t)(v_x1 >> 12); // %RH * 1024
 }
 
 /* ------------------------
@@ -259,67 +282,82 @@ void __attribute__((interrupt("machine"))) trap_handler(void)
  * ------------------------ */
 int main(void)
 {
-    // Clear result word.
+    volatile uint32_t *addr_uart = (volatile uint32_t *)MMIO_uart_BASE;
+
     RESULT[0] = 0u;
 
-    // Set trap handler.
-    set_handler((uint32_t)trap_handler);
+    spi_cfg.msb_first   = 1;
+    spi_cfg.delay_byte  = 0;
+    spi_cfg.n_delay_byte= 0;
+    spi_cfg.cpol        = 0; // SPI mode 0
+    spi_cfg.cpha        = 0;
+    spi_cfg.clk_div     = 100000;
 
-    // Configure GPIO0 as input and enable its interrupt.
-    gpio_set_direction(0x0u);
-    gpio_clear_irq(0xFFFFFFFFu);
-    gpio_enable_irq(1u << 0);
-    seg7_write(0u, 0u);
+    print(addr_uart, "Start program\n\0");
 
-    // Program and enable timer interrupts.
-    g_next_tick_deadline = clint_read_mtime() + (uint64_t)TIMER_TICKS;
-    g_debounce_active = 0u;
-    clint_write_mtimecmp(g_next_tick_deadline);
-    enable_timer_irq();
+    configure_spi(&spi_cfg);
 
-    // Enable CPU external interrupts.
-    enable_external_irq();
+    // --- Detect ---
+    uint8_t id = bme280_read_u8(BME280_REG_ID);
+    RESULT[1] = id;
 
-    // Wait until 1000 button interrupts arrive.
-    while (g_irq_count_button < 1000u) {
-        uint32_t pending_button;
-        uint32_t pending_timer;
-        uint32_t mstatus = irq_save_disable();
-        pending_button = g_button_pending;
-        g_button_pending = 0u;
-        pending_timer = g_timer_pending;
-        g_timer_pending = 0u;
-        irq_restore(mstatus);
-
-        while (pending_button--) {
-            g_irq_count_button++;
-            printf_int((volatile uint32_t *)MMIO_UART_BASE, "BTN %d\n", (int)g_irq_count_button);
-        }
-        while (pending_timer--) {
-            g_irq_count_timer++;
-            printf_int((volatile uint32_t *)MMIO_UART_BASE, "TMR %d\n", (int)g_irq_count_timer);
-        }
-
-        if ((pending_button | pending_timer) != 0u) {
-            seg7_write((g_irq_count_timer << 16) | (g_irq_count_button & 0xFFFFu), 0u);
-        }
-
-        if (g_button_pending == 0u && g_timer_pending == 0u) {
-            __asm__ volatile ("wfi");
-        }
+    if (id != 0x60) {
+        print(addr_uart, "BME280 ID mismatch\n\0");
+        printf_int(addr_uart, "ID=%d (expected 96)\n", (int)id, 0, 0);
+        RESULT[0] = ERR_FLAG;
+        for (;;) { __asm__ volatile ("wfi"); }
     }
 
-    // Stop external interrupts once the target count is reached.
-    gpio_enable_irq(0u);
-    csr_write_mie(csr_read_mie() & ~(MIE_MEIE_MASK | MIE_MTIE_MASK));
-    clint_write_mtimecmp(~(uint64_t)0);
+    bme280_init_basic();
+    bme280_read_calibration();
 
-    // Record a simple success signature and latch the last IRQ sources.
     RESULT[0] = OK_FLAG;
-    RESULT[1] = g_last_ext_irq;
-    RESULT[2] = g_last_gpio_irq;
+    RESULT[5] = 0u;
 
     for (;;) {
-        __asm__ volatile ("wfi");
+        // Leer raw
+        uint8_t raw[8];
+        bme280_read(BME280_REG_DATA, raw, 8);
+
+        int32_t adc_P = (int32_t)(((uint32_t)raw[0] << 12) | ((uint32_t)raw[1] << 4) | ((uint32_t)raw[2] >> 4));
+        int32_t adc_T = (int32_t)(((uint32_t)raw[3] << 12) | ((uint32_t)raw[4] << 4) | ((uint32_t)raw[5] >> 4));
+        int32_t adc_H = (int32_t)(((uint32_t)raw[6] << 8)  | ((uint32_t)raw[7]));
+
+        // Compensar
+        int32_t  T_x100   = bme280_comp_T_x100(adc_T);   // °C * 100
+        uint32_t P_Pa     = bme280_comp_P_Pa(adc_P);     // Pa
+        uint32_t H_x1024  = bme280_comp_H_x1024(adc_H);  // % * 1024
+
+        // Formatear para imprimir solo int:
+        int32_t  T_int = T_x100 / 100;
+        int32_t  T_dec = T_x100 % 100; if (T_dec < 0) T_dec = -T_dec;
+
+        // Humedad: % *100 (desde %*1024)
+        // H_x100 = round(H*100) = (H_x1024*100 + 512)/1024
+        uint32_t H_x100 = (H_x1024 * 100u + 512u) >> 10;
+        uint32_t H_int = H_x100 / 100u;
+        uint32_t H_dec = H_x100 % 100u;
+
+        // Presión: hPa con 2 decimales. 1 hPa = 100 Pa, así que Pa == hPa*100.
+        uint32_t P_hPa_x100 = P_Pa;
+        uint32_t P_int = P_hPa_x100 / 100u;
+        uint32_t P_dec = P_hPa_x100 % 100u;
+
+        printf_int(addr_uart, "T=%d.%dC H=%d.%d%% P=%d.%dhPa\n\r",
+                   (int)T_int, (int)T_dec, (int)H_int, (int)H_dec, (int)P_int, (int)P_dec);
+
+        // 8 displays: [Temp xx.xx][Hum xx.xx]
+        // DPs on digit 6 and digit 2 place the decimal point in each 4-digit group.
+        uint32_t T_disp = seg7_pack_x100((T_x100 < 0) ? (uint32_t)(-T_x100) : (uint32_t)T_x100);
+        uint32_t H_disp = seg7_pack_x100(H_x100);
+        seg7_write((T_disp << 16) | H_disp, (1u << 6) | (1u << 2));
+
+        // Guardar también en RESULT por si quieres mirar DMEM
+        RESULT[2] = (uint32_t)T_x100;
+        RESULT[3] = (uint32_t)P_Pa;
+        RESULT[4] = (uint32_t)H_x100;
+        RESULT[5] = RESULT[5] + 1u;
+
+        delay_1s();
     }
 }

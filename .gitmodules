@@ -13,3 +13,6 @@
 [submodule "hw/RTL/peripherals/axi_clint"]
 	path = hw/RTL/peripherals/axi_clint
 	url = https://github.com/rodrigoolmos/axi_clint.git
+[submodule "hw/RTL/peripherals/axi_spi"]
+	path = hw/RTL/peripherals/axi_spi
+	url = https://github.com/rodrigoolmos/axi_spi.git

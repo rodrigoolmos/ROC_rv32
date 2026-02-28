@@ -26,7 +26,13 @@ module soc #(
     // 7-segment display outputs
     output logic [NDISP-1:0]         seg,
     output logic [6:0]               ABDCEFG,
-    output logic                     DP
+    output logic                     DP,
+
+    // SPI physical interface
+    output logic        spi_clk,
+    output logic        spi_mosi,
+    input  logic        spi_miso,
+    output logic        spi_cs_n
 );
 
     logic rst_n;
@@ -91,7 +97,7 @@ module soc #(
     logic                     rready;
 
     localparam int AXI_ADDR_WIDTH = 32;
-    localparam int AXI_NUM_SLAVES = 4;
+    localparam int AXI_NUM_SLAVES = 5;
     localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_BASE  = 32'h0000_0000;
     localparam logic [AXI_ADDR_WIDTH-1:0] GPIO_MASK  = 32'h0000_0FFF;
     localparam logic [AXI_ADDR_WIDTH-1:0] REG_BASE   = 32'h0000_1000;
@@ -100,6 +106,8 @@ module soc #(
     localparam logic [AXI_ADDR_WIDTH-1:0] UART_MASK  = 32'h0000_0FFF;
     localparam logic [AXI_ADDR_WIDTH-1:0] CLINT_BASE = 32'h0000_3000;
     localparam logic [AXI_ADDR_WIDTH-1:0] CLINT_MASK = 32'h0000_0FFF;
+    localparam logic [AXI_ADDR_WIDTH-1:0] SPI_BASE   = 32'h0000_4000;
+    localparam logic [AXI_ADDR_WIDTH-1:0] SPI_MASK   = 32'h0000_0FFF;
 
     // AXI4-Lite SLAVE INTERFACE arrays (crossbar -> peripherals)
     logic [AXI_ADDR_WIDTH-1:0] awaddr_s [AXI_NUM_SLAVES-1:0];
@@ -220,7 +228,8 @@ module soc #(
             '{base: GPIO_BASE,  mask: GPIO_MASK},
             '{base: REG_BASE,   mask: REG_MASK},
             '{base: UART_BASE,  mask: UART_MASK},
-            '{base: CLINT_BASE, mask: CLINT_MASK}
+            '{base: CLINT_BASE, mask: CLINT_MASK},
+            '{base: SPI_BASE,   mask: SPI_MASK}
         })
     ) axi_xbar (
         .clk(clk),
@@ -434,6 +443,46 @@ module soc #(
 
         // Timer interrupt output
         .timer_irq(timer_irq)
+    );
+
+    // AXI4-Lite SPI peripheral
+    axi_spi #(
+        .FIFO_DEPTH(32)
+    ) spi_peripheral_i (
+        .clk(clk),
+        .nrst(rst_n),
+        
+        // AXI4-Lite SLAVE
+        .awaddr(awaddr_s[4]),
+        .awprot(awprot_s[4]),
+        .awvalid(awvalid_s[4]),
+        .awready(awready_s[4]),
+
+        .wdata(wdata_s[4]),
+        .wstrb(wstrb_s[4]),
+        .wvalid(wvalid_s[4]),
+        .wready(wready_s[4]),
+
+        .bresp(bresp_s[4]),
+        .bvalid(bvalid_s[4]),
+        .bready(bready_s[4]),
+
+        .araddr(araddr_s[4]),
+        .arprot(arprot_s[4]),
+        .arvalid(arvalid_s[4]),
+        .arready(arready_s[4]),
+
+        .rdata(rdata_s[4]),
+        .rresp(rresp_s[4]),
+        .rvalid(rvalid_s[4]),
+        .rready(rready_s[4]),
+
+        // SPI physical interface
+        .spi_clk(spi_clk),
+        .spi_mosi(spi_mosi),
+        .spi_miso(spi_miso),
+        .spi_cs_n(spi_cs_n)
+
     );
 
     // Instruction Memory (sync read)
